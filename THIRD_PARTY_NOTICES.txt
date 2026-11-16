@@ -1,0 +1,95 @@
+LEO Network Simulator — Third-party notices and source distribution
+
+Project-authored and adapted program code is distributed under GPL-3.0-only;
+see LICENSE. Individual third-party files retain their original terms and
+copyright notices. No exclusive ownership of third-party material is claimed.
+The complete preferred source and build scripts accompany the executables in
+this same folder. Windows UI dependency source archives are retained under
+source-dependencies/ at the pinned versions. Modification and redistribution are permitted under the
+applicable licenses. There is no warranty.
+
+Changes dated 2026-11-16: the supplied FLoRaSat ground-node routing model was
+adapted into a standalone event scheduler, routing registry, INI adapter and
+browser replay; packaging no longer invokes OMNeT++, INET, WSL or Docker at
+runtime. These changes are not an upstream FLoRaSat release. Matching the full
+upstream simulator's event behavior is not claimed.
+
+FLoRaSat / supplied leo-main
+  Source: https://gitlab.inria.fr/jfraire/florasat
+  Received terms: engine/vendor/leo-main-LICENSE.md (LGPL version 3).
+  Adapted routing, constellation, station movement, configuration and replay.
+  Original supplied source fingerprints: replay-model.json and
+  engine/vendor-origin.json. The latter identifies the unmodified vendored
+  libnorad files. Copyright notices in those files have been preserved.
+
+leosatellites / Aiden Valentine and contributors
+  Source: https://github.com/Avian688/leosatellites
+  Published terms: GPL version 3; the combined program is supplied under GPLv3.
+  cOrbitA, cNoradBaseA, cNoradSGP4A and cEcef derive from this source lineage.
+  Earlier libnorad code credits Michael F. Henry (2001-2003); other notices
+  include Marian Felder, Florian Schweikowski and Diego Maldonado.
+  References identify provenance; original owners retain their rights.
+
+OS3 / inet-framework and contributors
+  Source: https://github.com/inet-framework/os3
+  Terms: LGPL version 3 (licenses/LGPL-3.0.txt).
+  Base libnorad source and data/earth.png originate in OS3.
+  Map source: images/os3/background_earth.png, git blob
+  3c78e62e7e3880b5ef717a3406ab47678128bb80; distributed unmodified.
+
+nlohmann/json 3.12.0 — Niels Lohmann and contributors
+  Source: https://github.com/nlohmann/json/tree/v3.12.0
+  Terms: MIT; licenses/nlohmann-json-3.12.0.txt.
+
+Python 3.12.10 — Python Software Foundation and contributors
+  Terms: licenses/CPython-3.12.10.txt and CPython-3.12.10-incorporated.rst.
+  The incorporated-software text covers additional Python component notices.
+  OpenSSL 3.0.16: licenses/OpenSSL-3.0.16.txt (Apache-2.0).
+  libffi 3.4.4: licenses/libffi-3.4.4.txt.
+  bzip2 1.0.8 and liblzma/XZ 5.2.5: licenses/bzip2-1.0.8.txt and
+  licenses/xz-5.2.5-COPYING.txt (only the library is bundled).
+  Unicode data: licenses/Unicode-DFS-2016.txt and Unicode-current.txt.
+
+Windows UI dependencies
+  pywebview 6.2.1 — BSD-3-Clause; licenses/pywebview/.
+  pythonnet 3.0.5 — MIT; licenses/pythonnet-MIT.txt.
+  clr_loader 0.2.10 — MIT; licenses/clr-loader-MIT.txt.
+  proxy_tools 0.1.0 — MIT; licenses/proxy-tools-MIT.txt.
+  bottle 0.13.4 — MIT; licenses/bottle/.
+  typing_extensions 4.15.0 — PSF-2.0; licenses/typing_extensions/.
+  cffi 2.0.0 — MIT and incorporated notices; licenses/cffi/.
+  pycparser 3.0 — BSD-3-Clause; licenses/pycparser/.
+
+Microsoft WebView2 SDK 1.0.3856.49
+  Copyright Microsoft Corporation. All rights reserved.
+  Terms: licenses/Microsoft-WebView2-1.0.3856.49.txt.
+  Source: https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.3856.49
+  The WebView2 Runtime and .NET Framework are system prerequisites, not bundled
+  browser/runtime installers. Microsoft runtime distribution terms apply if
+  these prerequisites are separately redistributed.
+
+Build tools and native runtime
+  Exact Python tool versions: requirements-build.txt.
+  PyInstaller 6.20.0: GPL with Bootloader Exception; licenses/pyinstaller/.
+  PyInstaller runtime hooks: Apache-2.0; licenses/pyinstaller-hooks-contrib/.
+  Other Python build-tool and setuptools-vendored component notices are
+  retained under licenses/ by package name, with their original directory names.
+  GNU libstdc++/libgcc: GPLv3 with GCC Runtime Library Exception 3.1;
+  see LICENSE and licenses/GCC-Runtime-Exception-3.1.txt.
+  MinGW-w64: licenses/MinGW-w64-COPYING.txt and
+  MinGW-w64-installed-copyright.txt; individual files retain their terms.
+  Engine compiler used: x86_64-w64-mingw32-g++ 13-win32, static runtime linking.
+
+Rebuild
+  Windows, Python 3.12, and WebView2 Runtime are used for development.
+  python -m pip install -r requirements-build.txt
+  For the native build only, WSL Ubuntu with g++-mingw-w64-x86-64 is required.
+  python engine/build.py
+  python -m PyInstaller --noconfirm sim-ui.spec
+  python build_release.py
+  The native executable can be replaced with a rebuilt compatible version;
+  no signatures or authentication restrict replacement. Compilers are not
+  required to run the delivered application.
+
+The included notices document the published upstream terms. They are not a
+representation of ownership of third-party code, nor an exclusive license.
