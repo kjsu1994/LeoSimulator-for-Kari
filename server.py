@@ -443,6 +443,15 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
         except (ValueError, UnicodeError) as exc:
             return self.send_json({"error": str(exc)}, 400)
 
+        if self.path == "/api/open-ini":
+            try:
+                if not LEO_DIR or not os.path.isfile(INI_PATH):
+                    raise ValueError("원본 프로젝트의 omnetpp.ini를 찾을 수 없습니다.")
+                subprocess.Popen(["notepad.exe", INI_PATH], creationflags=NO_WIN)
+                return self.send_json({"ok": True, "path": INI_PATH})
+            except (ValueError, OSError) as exc:
+                return self.send_json({"error": str(exc)}, 400)
+
         if self.path == "/api/run":
             try:
                 cfg_name = body.get("configName") or read_ini_config().get("activeConfig", "Dijkstra132")

@@ -17,7 +17,7 @@ button:disabled { opacity: 0.5; cursor: wait; }
 .map-summary { flex: none; padding: 16px 20px 12px; border-bottom: 1px solid #1b2d46; }
 .map-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 20px; }
 .map-metrics dt { color: #8da2c0; font-size: 12px; line-height: 1.5; }
-.map-metrics dd { color: #e6edf3; font: 600 18px/1.6 ui-monospace, monospace; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.map-metrics dd { white-space: nowrap; color: #e6edf3; font: 600 18px/1.6 ui-monospace, monospace; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .map-metrics > div:first-child dd { color: #7fe8ff; }
 .map-context { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 16px; margin-top: 10px; color: #8da2c0; font-size: 12px; }
 .map-viewport { flex: 1; min-height: 0; width: 100%; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
@@ -88,3 +88,7 @@ td.path-cell { font-family: ui-monospace, monospace; font-size: 12px; color: #b5
 
 .csv-source { color: #9ec3ff; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; margin-bottom: 8px; }
 .csv-source:empty { display: none; }
+
+.mode-hint { color: #9ab0cf; font-size: 12px; line-height: 1.6; padding: 9px 10px; background: #0d1b30; border-radius: 4px; }
+.saved-config { display: block; color: #e6edf3; font-size: 14px; font-weight: 600; padding: 7px 0 2px; }
+.saved-config[hidden], .runner-actions[hidden] { display: none; }

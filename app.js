@@ -288,9 +288,9 @@ function render() {
   const avgHops = endIdx ? (sumHops / endIdx).toFixed(1) : "0.0";
 
   document.getElementById("mapTime").textContent = `${mapTime.toFixed(1)} s`;
-  document.getElementById("mapNetwork").textContent = snapshot ? `${sats.length} / ${islCount} / ${gslLinks.length}` : "N/A";
-  document.getElementById("mapTraffic").textContent = snapshot && !snapshot.reconstructed ? `${snapshot.sent} / ${snapshot.received}` : "제공되지 않음";
-  document.getElementById("mapMeasured").textContent = snapshot && !snapshot.reconstructed && snapshot.received ? `${(snapshot.delaySumSeconds * 1000 / snapshot.received).toFixed(2)} ms` : "N/A";
+  document.getElementById("mapSatellites").textContent = snapshot ? `${sats.length.toLocaleString("ko-KR")}기` : "—";
+  document.getElementById("mapIsl").textContent = snapshot ? `${islCount.toLocaleString("ko-KR")}개` : "—";
+  document.getElementById("mapGroundLinks").textContent = snapshot ? `${gslLinks.length.toLocaleString("ko-KR")}개` : "—";
   document.getElementById("mapRouting").textContent = `${resultMeta?.config.activeConfig || "CSV"} | ${ORBIT_CFG.routingType} | ${ORBIT_CFG.metric}`;
   document.getElementById("mapSample").textContent = snapshot ? (snapshot.reconstructed && csvMapTime === null ? "설정 기반 재현 · CSV 경로 · 실측 수신 통계 없음" : csvMapTime === null ? `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation` : `참고 지도 · ${resultMeta.config.activeConfig} · ${snapshot.t.toFixed(3)} s · 선택 CSV와 별도`) : "No engine state for this data";
 
@@ -458,6 +458,7 @@ iniFilter.oninput = renderIniTable;
 chkShowNodes.onchange = renderIniTable;
 
 function updateProfileBox(cfg, highlight) {
+  document.getElementById("savedConfigName").textContent = cfg.activeConfig || "결과를 선택하세요";
   const entries = cfg.effectiveEntries || [];
   const value = key => entries.find(e => e.k === key)?.v;
   document.getElementById("scenarioConstellation").textContent = cfg.numSatellites == null ? "—" : `${cfg.numSatellites}기 · ${cfg.planes}개 궤도면`;
@@ -566,6 +567,19 @@ if (location.protocol.startsWith("http")) {
   window.addEventListener("focus", () => fetchConfig(cfgNameSel.dataset.loaded ? cfgNameSel.value : "", false));
 }
 
+document.getElementById("btnOpenIni").onclick = async () => {
+  if (location.protocol === "file:") {
+    setStatus("INI 편집은 sim-ui.exe 또는 start_ui.bat에서 사용할 수 있습니다. HTML에 표시된 INI는 저장된 실행의 사본입니다.");
+    return;
+  }
+  try {
+    const res = await fetch("/api/open-ini", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "설정 파일을 열지 못했습니다.");
+    setStatus(`새 실행 설정 편집: ${data.path} · 저장 후 설정 새로고침을 누르세요. 보관된 실행 결과는 변경되지 않습니다.`);
+  } catch (err) { setStatus(err.message); }
+};
+
 document.getElementById("btnRunSim").onclick = async e => {
   const btn = e.target;
   const cfgName = cfgNameSel.value;
@@ -597,7 +611,13 @@ if (location.protocol === "file:") {
   }
   else setStatus("No saved engine result. Run a simulation using start_ui.bat or sim-ui.exe first.");
   cfgNameSel.disabled = true;
-  document.getElementById("btnRefreshIni").disabled = true;
+  cfgNameSel.hidden = true;
+  document.getElementById("savedConfigName").hidden = false;
+  document.getElementById("cfgNameLabel").textContent = "결과의 실행 구성";
+  document.getElementById("scenarioHeading").textContent = "실행 결과";
+  document.getElementById("btnRefreshIni").hidden = true;
+  document.getElementById("runnerActions").hidden = true;
+  document.getElementById("runModeHint").hidden = false;
 }
 
 async function openResultBundle(bundle, request = ++resultLoadRequest) {

@@ -31,6 +31,8 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     assert.equal(await evaluate("document.querySelector('#iniTable tbody').children.length"),1);
     await evaluate("document.querySelector('#scenarioDetails summary').click();iniFilter.value='';iniFilter.oninput()");
     console.log("Scenario UI passed: concise conditions, details collapsed by default, disclosure and search work");
+    assert.equal(await evaluate("document.getElementById('cfgName').disabled"),false);
+    assert(await evaluate("document.getElementById('runnerActions').checkVisibility() && document.getElementById('btnOpenIni').checkVisibility()"));
     await evaluate("simTime=300.5;render()");
     assert.equal(await evaluate("stateAt(simTime).t"),300.5);
     assert.equal(await evaluate("document.getElementById('kpiSat').textContent"),"132 / 264");
@@ -60,6 +62,12 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
       fs.copyFileSync(path.join(__dirname,file),path.join(offline,file));
     await send("Page.navigate", {url: require("node:url").pathToFileURL(path.join(offline, "index.html")).href});
     await retry(async()=> assert(await evaluate("location.protocol === 'file:' && typeof resultMeta !== 'undefined' && resultMeta?.replay === true")));
+    assert.equal(await evaluate("document.getElementById('cfgName').checkVisibility()"),false);
+    assert.equal(await evaluate("document.getElementById('runnerActions').checkVisibility()"),false);
+    assert.equal(await evaluate("document.getElementById('savedConfigName').textContent"),"Dijkstra132");
+    assert.equal(await evaluate("document.getElementById('btnOpenIni').checkVisibility()"),true);
+    await evaluate("document.getElementById('btnOpenIni').click()");
+    assert(await evaluate("document.getElementById('runStatus').textContent.includes('start_ui.bat')"));
     assert.equal(await evaluate("lastSatStates.length"), 132);
     assert(await evaluate("document.querySelector('#routeTable tbody').children.length > 0"));
     assert(await evaluate("stateAt(simTime).links.length > 0"));
@@ -73,7 +81,10 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     await selectFolder(validBundle);
     await retry(async()=>assert(await evaluate("resultMeta?.runId==='reference-dijkstra'")));
     assert.equal(await evaluate("lastSatStates.length"),132);
-    assert.equal(await evaluate("document.getElementById('mapTraffic').textContent"),"제공되지 않음");
+    assert.equal(await evaluate("document.getElementById('mapTraffic') || document.getElementById('mapMeasured')"),null);
+    assert.equal(await evaluate("document.getElementById('mapSatellites').textContent"),"132기");
+    assert.equal(await evaluate("document.getElementById('mapIsl').textContent"),"264개");
+    assert(await evaluate("document.getElementById('mapGroundLinks').textContent.endsWith('개')"));
     const broken=path.join(profile,"broken-package");fs.cpSync(validBundle,broken,{recursive:true});
     fs.appendFileSync(path.join(broken,"routes.csv"),"modified");
     await selectFolder(broken);

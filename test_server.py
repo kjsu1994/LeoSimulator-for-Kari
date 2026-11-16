@@ -35,6 +35,28 @@ class DataTests(unittest.TestCase):
             server.read_ini_config("Dijkstra132; touch injected")
         self.assertEqual(server.read_ini_config("Dijkstra132Hop")["metric"], "delay")
 
+    def test_ini_editor_opens_live_settings_without_modifying_files(self):
+        import http.server
+        import threading
+        import urllib.request
+        before = Path(server.INI_PATH).read_bytes()
+        with patch.object(server.subprocess, "Popen") as launch:
+            httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), server.SimHandler)
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = urllib.request.Request(f"http://127.0.0.1:{httpd.server_port}/api/open-ini", method="POST")
+                with urllib.request.urlopen(request) as response:
+                    data = json.load(response)
+                self.assertTrue(data["ok"])
+                self.assertEqual(data["path"], server.INI_PATH)
+                launch.assert_called_once_with(["notepad.exe", server.INI_PATH], creationflags=server.NO_WIN)
+                self.assertEqual(Path(server.INI_PATH).read_bytes(), before)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join()
+
     def test_offline_export_preserves_result(self):
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "data").mkdir()

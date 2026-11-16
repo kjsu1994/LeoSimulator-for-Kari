@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>LEO Satellite Routing Simulator UI (Dijkstra132)</title>
-  <link rel="stylesheet" href="style.css?v=20261116-bundle-1">
+  <link rel="stylesheet" href="style.css?v=20261116-ui-mode-3">
 </head>
 <body>
   <header class="topbar">
@@ -35,9 +35,9 @@
       <div class="map-summary" aria-label="Simulation status">
         <dl class="map-metrics">
           <div><dt>재생 시각</dt><dd id="mapTime">--</dd></div>
-          <div><dt>Satellites / ISL / Ground links</dt><dd id="mapNetwork">--</dd></div>
-          <div><dt>실제 송신 / 수신</dt><dd id="mapTraffic">--</dd></div>
-          <div><dt>실측 종단 간 지연</dt><dd id="mapMeasured">--</dd></div>
+          <div><dt>위성</dt><dd id="mapSatellites">—</dd></div>
+          <div><dt>위성 간 연결</dt><dd id="mapIsl">—</dd></div>
+          <div><dt>지상 연결</dt><dd id="mapGroundLinks">—</dd></div>
         </dl>
         <div class="map-context"><span id="mapRouting"></span><span id="mapSample"></span></div>
       </div>
@@ -50,16 +50,18 @@
     <aside class="sidebar">
       <div class="card sim-runner">
         <div class="runner-head">
-          <span>시나리오</span>
+          <span id="scenarioHeading">시나리오</span>
           <div class="head-btns">
+            <button id="btnOpenIni" type="button" title="새 실행에 사용할 원본 INI를 편집합니다. 보관된 결과는 바뀌지 않습니다.">INI 편집</button>
             <button id="btnRefreshIni" type="button" title="설정 새로고침" aria-label="설정 새로고침">🔄</button>
           </div>
         </div>
         <div class="cfg-grid">
-          <label class="span-2">실행 구성
+          <label class="span-2"><span id="cfgNameLabel">실행 구성</span>
             <select id="cfgName">
               <option value="Dijkstra132">Dijkstra132</option>
             </select>
+            <strong id="savedConfigName" class="saved-config" hidden></strong>
           </label>
           <dl class="scenario-facts span-2" aria-label="시나리오 정보">
             <div><dt>위성 구성</dt><dd id="scenarioConstellation">—</dd></div>
@@ -95,7 +97,8 @@
             </div>
           </details>
         </div>
-        <div class="runner-actions">
+        <p id="runModeHint" class="mode-hint" hidden>HTML은 저장된 결과를 재생하는 모드입니다. 설정 편집과 새 실행은 sim-ui.exe 또는 start_ui.bat으로 이용하세요.</p>
+        <div id="runnerActions" class="runner-actions">
           <button id="btnRunSim" type="button" class="btn-primary">선택 시나리오 실행</button>
         </div>
         <a id="resultFiles" hidden download></a>
@@ -140,10 +143,10 @@
     </aside>
   </main>
 
-  <script src="data/latest_result.js?v=20261116-bundle-1"></script>
-  <script src="csv.js?v=20261116-bundle-1"></script>
-  <script src="bundle.js?v=20261116-bundle-1"></script>
-  <script src="orbit.js?v=20261116-bundle-1"></script>
-  <script src="app.js?v=20261116-bundle-1"></script>
+  <script src="data/latest_result.js?v=20261116-ui-mode-3"></script>
+  <script src="csv.js?v=20261116-ui-mode-3"></script>
+  <script src="bundle.js?v=20261116-ui-mode-3"></script>
+  <script src="orbit.js?v=20261116-ui-mode-3"></script>
+  <script src="app.js?v=20261116-ui-mode-3"></script>
 </body>
 </html>
