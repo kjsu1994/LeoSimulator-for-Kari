@@ -19,7 +19,7 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     const evaluate=async expression=> {const r=await send("Runtime.evaluate",{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
     await send("Runtime.enable");
     await send("Page.navigate",{url:"http://127.0.0.1:8091"});
-    await retry(async()=> assert(await evaluate("typeof states !== 'undefined' && states.length > 0")));
+    await retry(async()=> assert(await evaluate("typeof resultMeta !== 'undefined' && resultMeta?.replay === true")));
     assert.equal(await evaluate("document.getElementById('scenarioDetails').open"),false);
     assert.equal(await evaluate("document.getElementById('iniTable').checkVisibility()"),false);
     assert.equal(await evaluate("document.getElementById('scenarioConstellation').textContent"),"132기 · 12개 궤도면");
@@ -32,14 +32,14 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     await evaluate("document.querySelector('#scenarioDetails summary').click();iniFilter.value='';iniFilter.oninput()");
     console.log("Scenario UI passed: concise conditions, details collapsed by default, disclosure and search work");
     await evaluate("simTime=300.5;render()");
-    assert.equal(await evaluate("stateAt(simTime).t"),300);
+    assert.equal(await evaluate("stateAt(simTime).t"),300.5);
     assert.equal(await evaluate("document.getElementById('kpiSat').textContent"),"132 / 264");
     assert.equal(await evaluate("routes.length"),2671);
     assert(await evaluate("document.querySelector('#routeTable tbody').children.length > 0"));
     await evaluate("cfgNameSel.value='Dijkstra132Hop';cfgNameSel.onchange()");
-    assert.equal(await evaluate("document.getElementById('scenarioRouting').textContent"),"홉 수 최소");
+    assert.equal(await evaluate("document.getElementById('scenarioRouting').textContent"),"지연 최소");
     assert.equal(await evaluate("routes.length"),2671);
-    assert.equal(await evaluate("states.length"),602);
+    assert.equal(await evaluate("resultMeta.replay"),true);
     assert(await evaluate("Number(document.getElementById('kpiGsl').textContent) > 0"));
     assert.equal(await evaluate("resultMeta.config.activeConfig"),"Dijkstra132");
     assert.equal(await evaluate("ORBIT_CFG.metric"),"delay");
@@ -47,8 +47,8 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     await evaluate("window.dispatchEvent(new Event('focus'))");
     await new Promise(r=>setTimeout(r,300));
     assert.equal(await evaluate("lastSatStates.length"),132);
-    await evaluate("(async()=>{installResult(await fetch('/api/result').then(r=>r.json()));simTime=599.5;render()})()");
-    assert.equal(await evaluate("stateAt(simTime).t"),599);
+    await evaluate("(async()=>{await openResultBundle((await fetch('/api/result').then(r=>r.json())).bundle);simTime=599.5;render()})()");
+    assert.equal(await evaluate("stateAt(simTime).t"),599.5);
     await evaluate("clearResult();routes=parseRoutesCsv("+JSON.stringify(fs.readFileSync(path.join(__dirname,"data/routes.csv"),"utf8"))+");simTime=30;render()");
     assert.equal(await evaluate("states.length"),0);
     assert.equal(await evaluate("routes.length"),2671);
@@ -56,13 +56,36 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     console.log("Chrome passed: engine replay, fractional-time sampling, table rendering, scenario selection preserves recorded map, result reload, external CSV without invented geometry");
     const offline = path.join(profile, "offline");
     fs.mkdirSync(path.join(offline, "data"), {recursive:true});
-    for (const file of ["index.html", "app.js", "orbit.js", "csv.js", "style.css", "data/latest_result.js", "data/earth.png"])
+    for (const file of ["index.html", "app.js", "orbit.js", "csv.js", "bundle.js", "style.css", "data/latest_result.js", "data/earth.png"])
       fs.copyFileSync(path.join(__dirname,file),path.join(offline,file));
     await send("Page.navigate", {url: require("node:url").pathToFileURL(path.join(offline, "index.html")).href});
-    await retry(async()=> assert(await evaluate("location.protocol === 'file:' && typeof states !== 'undefined' && states.length > 0")));
+    await retry(async()=> assert(await evaluate("location.protocol === 'file:' && typeof resultMeta !== 'undefined' && resultMeta?.replay === true")));
     assert.equal(await evaluate("lastSatStates.length"), 132);
     assert(await evaluate("document.querySelector('#routeTable tbody').children.length > 0"));
     assert(await evaluate("stateAt(simTime).links.length > 0"));
+    const validBundle = path.join(profile,"result-package");
+    fs.cpSync(path.join(__dirname,"testdata/bundle"),validBundle,{recursive:true});
+    const selectFolder = async folder => {
+      const {root}=await send("DOM.getDocument");
+      const {nodeId}=await send("DOM.querySelector",{nodeId:root.nodeId,selector:"#resultFolder"});
+      await send("DOM.setFileInputFiles",{nodeId,files:[folder]});
+    };
+    await selectFolder(validBundle);
+    await retry(async()=>assert(await evaluate("resultMeta?.runId==='reference-dijkstra'")));
+    assert.equal(await evaluate("lastSatStates.length"),132);
+    assert.equal(await evaluate("document.getElementById('mapTraffic').textContent"),"제공되지 않음");
+    const broken=path.join(profile,"broken-package");fs.cpSync(validBundle,broken,{recursive:true});
+    fs.appendFileSync(path.join(broken,"routes.csv"),"modified");
+    await selectFolder(broken);
+    await retry(async()=>assert(await evaluate("document.getElementById('runStatus').textContent.includes('기존 화면을 유지')")));
+    assert.equal(await evaluate("resultMeta.runId"),"reference-dijkstra");
+    assert.equal(await evaluate("lastSatStates.length"),132);
+    fs.copyFileSync(path.join(validBundle,"routes.csv"),path.join(broken,"routes.csv"));
+    fs.unlinkSync(path.join(broken,"config/simulations/Dijkstra132/stations/EsaDsn-Mobiles.ini"));
+    await selectFolder(broken);
+    await retry(async()=>assert(await evaluate("document.getElementById('runStatus').textContent.includes('Missing/invalid result file')")));
+    assert.equal(await evaluate("resultMeta.runId"),"reference-dijkstra");
+    console.log("Result folder passed: real directory input, CSV/INI replay, checksums and missing-file rejection retain previous map");
     const importCsv = async file => {
       const {root} = await send("DOM.getDocument");
       const {nodeId} = await send("DOM.querySelector", {nodeId:root.nodeId,selector:"#csvInput"});
@@ -74,7 +97,7 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     await evaluate("simTime=40;render()");
     await importCsv(matching);
     await retry(async()=> assert(await evaluate("document.getElementById('csvSource').textContent.includes('matching.csv')")));
-    assert.equal(await evaluate("states.length"),602);
+    assert.equal(await evaluate("resultMeta.replay"),true);
     assert.equal(await evaluate("csvMapTime"),null);
     assert.equal(await evaluate("lastSatStates.length"),132);
     assert(await evaluate("document.querySelector('#routeTable tbody').children.length > 0"));
@@ -92,7 +115,7 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     await importCsv(foreign);
     await retry(async()=> assert(await evaluate("routes.length===2 && simTime===7000")));
     assert.equal(await evaluate("csvMapTime"),300);
-    assert.equal(await evaluate("states.length"),602);
+    assert.equal(await evaluate("resultMeta.replay"),true);
     assert.equal(await evaluate("lastSatStates.length"),132);
     assert.equal(await evaluate("document.getElementById('mapTime').textContent"),"300.0 s");
     assert(await evaluate("document.getElementById('kpiDelay').textContent.startsWith('444.0 ms')"));

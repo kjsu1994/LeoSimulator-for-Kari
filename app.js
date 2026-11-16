@@ -10,7 +10,9 @@ earthImg.onload = () => render();
 
 let routes = []; // Legacy files have no matching configuration/state evidence.
 let states = [], resultMeta = null, loadedConfigKey = "", csvMapTime = null;
+let resultLoadRequest = 0;
 function stateAt(t) {
+  if (resultMeta?.replay) return replaySnapshot(t);
   let lo = 0, hi = states.length;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (states[mid].t <= t) lo = mid + 1; else hi = mid; }
   return lo ? states[lo - 1] : null;
@@ -24,13 +26,13 @@ function clearResult() {
 function installResult(result) {
   clearResult();
   routes = result.routes; states = result.states; resultMeta = result;
-  simTime = states.length ? Math.min(1210, states[states.length - 1].t) : 0;
+  simTime = Math.min(1210, result.replay ? result.config.simTimeLimit : (states.length ? states[states.length - 1].t : 0));
   applyLoadedConfig(result.config, { result: true });
-  syncTimeBounds(states.length ? states[states.length - 1].t : 0);
+  syncTimeBounds(result.replay ? result.config.simTimeLimit : (states.length ? states[states.length - 1].t : 0));
   setStatus(`Run ${result.runId} | engine snapshots | input ${result.inputHash.slice(0, 12)} | ${result.createdAt}`);
   const download = document.getElementById("resultFiles");
   download.hidden = false;
-  download.href = `data/runs/${result.runId}/results/routes.csv`;
+  download.href = `data/runs/${result.runId}/${result.replay ? "routes.csv" : "results/routes.csv"}`;
   download.textContent = `Original CSV | run ${result.runId} | SHA-256 ${result.csvHash.slice(0, 16)}`;
   render();
 }
@@ -287,15 +289,15 @@ function render() {
 
   document.getElementById("mapTime").textContent = `${mapTime.toFixed(1)} s`;
   document.getElementById("mapNetwork").textContent = snapshot ? `${sats.length} / ${islCount} / ${gslLinks.length}` : "N/A";
-  document.getElementById("mapTraffic").textContent = snapshot ? `${snapshot.sent} / ${snapshot.received}` : "N/A";
-  document.getElementById("mapMeasured").textContent = snapshot && snapshot.received ? `${(snapshot.delaySumSeconds * 1000 / snapshot.received).toFixed(2)} ms` : "N/A";
+  document.getElementById("mapTraffic").textContent = snapshot && !snapshot.reconstructed ? `${snapshot.sent} / ${snapshot.received}` : "제공되지 않음";
+  document.getElementById("mapMeasured").textContent = snapshot && !snapshot.reconstructed && snapshot.received ? `${(snapshot.delaySumSeconds * 1000 / snapshot.received).toFixed(2)} ms` : "N/A";
   document.getElementById("mapRouting").textContent = `${resultMeta?.config.activeConfig || "CSV"} | ${ORBIT_CFG.routingType} | ${ORBIT_CFG.metric}`;
-  document.getElementById("mapSample").textContent = snapshot ? (csvMapTime === null ? `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation` : `참고 지도 · ${resultMeta.config.activeConfig} · ${snapshot.t.toFixed(3)} s · 선택 CSV와 별도`) : "No engine state for this data";
+  document.getElementById("mapSample").textContent = snapshot ? (snapshot.reconstructed && csvMapTime === null ? "설정 기반 재현 · CSV 경로 · 실측 수신 통계 없음" : csvMapTime === null ? `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation` : `참고 지도 · ${resultMeta.config.activeConfig} · ${snapshot.t.toFixed(3)} s · 선택 CSV와 별도`) : "No engine state for this data";
 
   document.getElementById("timeLabel").textContent = `t = ${simTime.toFixed(1)} s`;
   document.getElementById("timeSlider").value = simTime;
   document.getElementById("kpiSat").textContent = snapshot ? `${sats.length} / ${islCount}` : "N/A";
-  document.getElementById("kpiGslLabel").textContent = "Engine ground links";
+  document.getElementById("kpiGslLabel").textContent = "설정 기반 연결";
   document.getElementById("kpiGsl").textContent = snapshot ? gslLinks.length : "N/A";
   document.getElementById("kpiPkts").textContent = `${endIdx} / ${routes.length}`;
   document.getElementById("kpiDelay").textContent = `${avgMs} ms / ${avgHops}`;
@@ -392,8 +394,10 @@ document.getElementById("csvInput").onchange = e => {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = "";
+  const request = ++resultLoadRequest;
   const reader = new FileReader();
   reader.onload = ev => {
+    if (request !== resultLoadRequest) return;
     try {
       const parsed = parseRoutesCsv(ev.target.result);
       const matchesMap = !!resultMeta && JSON.stringify(parsed) === JSON.stringify(resultMeta.routes);
@@ -404,7 +408,7 @@ document.getElementById("csvInput").onchange = e => {
       playing = false;
       document.getElementById("btnPlay").textContent = "Play";
       simTime = routes.length ? Math.min(Math.max(simTime, routes[0][0]), routes[routes.length - 1][0]) : 0;
-      syncTimeBounds(matchesMap ? states[states.length - 1].t : (routes.length ? routes[routes.length - 1][0] : 0));
+      syncTimeBounds(matchesMap ? (resultMeta.replay ? resultMeta.config.simTimeLimit : states[states.length - 1].t) : (routes.length ? routes[routes.length - 1][0] : 0));
       document.getElementById("csvSource").textContent = `선택 CSV: ${file.name} · ${routes.length.toLocaleString("ko-KR")}개 계획 경로`;
       setStatus(matchesMap ? "선택한 CSV가 저장된 실행 결과와 일치합니다. 지도와 경로를 함께 재생합니다." : "선택한 CSV의 경로 표와 통계를 재생합니다. 위치 정보가 없어 지도는 기존 실행의 참고 화면으로 유지합니다.");
     } catch (err) { setStatus(`CSV error: ${err.message}`); }
@@ -471,7 +475,7 @@ function updateProfileBox(cfg, highlight) {
   const ownEl = document.getElementById("cfgOwnIni");
 
   if (cfg.iniPath) {
-    iniSrc.textContent = cfg.leoFound ? `📂 ${cfg.iniPath}` : `⚠️ 내장 백업: ${cfg.iniPath}`;
+    iniSrc.textContent = cfg.iniPath.startsWith("config/") ? `보관된 설정: ${cfg.iniPath}` : cfg.leoFound ? `📂 ${cfg.iniPath}` : `⚠️ 내장 백업: ${cfg.iniPath}`;
     iniSrc.title = cfg.iniPath;
     iniSrc.style.color = cfg.leoFound ? "#69f0ae" : "#ffe066";
   } else if (!location.protocol.startsWith("http")) {
@@ -517,13 +521,7 @@ function applyLoadedConfig(cfg, opts = {}) {
   }
   loadedConfigKey = configKey;
   if (opts.result || !resultMeta) {
-  updateOrbitConfig({
-    altitude: cfg.altitude, inclination: cfg.inclination, minEl: cfg.minimumElevation,
-    numSatellites: cfg.numSatellites, planes: cfg.planes, phasing: cfg.phasing,
-    raanSpread: cfg.raanSpread, baseYear: cfg.baseYear, baseDay: cfg.baseDay,
-    routingType: cfg.routingType, metric: cfg.metric, maxRoutes: cfg.maxRoutes, routeLifetime: cfg.routeLifetime,
-    stations: cfg.stations, terminals: cfg.terminals
-  });
+  updateOrbitConfig({ ...cfg, minEl: cfg.minimumElevation });
   if (Array.isArray(cfg.stations) || Array.isArray(cfg.terminals)) populateFilters();
   if (cfg.simTimeLimit && csvMapTime === null) syncTimeBounds(cfg.simTimeLimit);
   }
@@ -556,22 +554,17 @@ if (location.protocol.startsWith("http")) {
       .then(d => { if (request === configRequest) applyLoadedConfig(d, { announce }); })
       .catch(err => { if (request === configRequest) setStatus(err.message); });
   };
-  if (window.SIM_RESULT) installResult(window.SIM_RESULT);
+  if (window.SIM_RESULT) {
+    if (window.SIM_RESULT.bundle) openResultBundle(window.SIM_RESULT.bundle).catch(err => setStatus(err.message));
+    else installResult(window.SIM_RESULT);
+  }
   fetch("/api/result", { cache: "no-store" }).then(r => { if (!r.ok) throw new Error("저장 결과를 불러오지 못했습니다."); return r.json(); })
-    .then(result => { if (configRequest !== 0) return; if (result && result.runId !== resultMeta?.runId) installResult(result); return fetchConfig(cfgNameSel.dataset.loaded ? cfgNameSel.value : ""); })
+    .then(async result => { if (configRequest !== 0) return; if (result && result.runId !== resultMeta?.runId) { if (result.bundle) await openResultBundle(result.bundle); else installResult(result); } if (!resultMeta?.replay) return fetchConfig(cfgNameSel.dataset.loaded ? cfgNameSel.value : ""); })
     .catch(err => { setStatus(resultMeta ? "저장된 실행 결과를 표시합니다. 서버 연결을 확인해 주세요." : err.message); });
   cfgNameSel.onchange = () => fetchConfig(cfgNameSel.value, true);
   document.getElementById("btnRefreshIni").onclick = () => fetchConfig(cfgNameSel.value, true);
   window.addEventListener("focus", () => fetchConfig(cfgNameSel.dataset.loaded ? cfgNameSel.value : "", false));
 }
-
-document.getElementById("btnOpenIni").onclick = async () => {
-  if (!location.protocol.startsWith("http")) {
-    return setStatus("⚠️ sim-ui.exe로 실행해야 원본 .ini 파일을 열 수 있습니다.");
-  }
-  const res = await fetch("/api/open-ini", { method: "POST" }).then(r => r.json());
-  if (res.ok) setStatus(`📂 열림: ${res.path}`);
-};
 
 document.getElementById("btnRunSim").onclick = async e => {
   const btn = e.target;
@@ -580,14 +573,14 @@ document.getElementById("btnRunSim").onclick = async e => {
     return setStatus("⚠️ 시뮬레이션 실행은 sim-ui.exe에서 동작합니다.");
   }
   btn.disabled = true;
-  setStatus(`Running [${cfgName}] from captured inputs (state output enabled)...`);
+  setStatus(`Running [${cfgName}] from captured inputs (original model unchanged)...`);
   try {
     const t0 = performance.now();
     const res = await fetch("/api/run", { method: "POST", body: JSON.stringify({ configName: cfgName }) }).then(r => r.json());
     if (!res.ok) throw new Error(res.error || "Simulation failed");
-    installResult(res);
+    if (res.bundle) await openResultBundle(res.bundle); else installResult(res);
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-    setStatus(`Completed [${cfgName}] | run ${res.runId} | ${elapsed}s | ${routes.length} planned routes | ${states.length} engine snapshots`);
+    setStatus(`Completed [${cfgName}] | run ${res.runId} | ${elapsed}s | ${routes.length} planned routes | CSV + INI bundle saved`);
   } catch (err) {
     setStatus(`❌ 실행 오류: ${err.message}`);
   } finally {
@@ -598,9 +591,43 @@ document.getElementById("btnRunSim").onclick = async e => {
 render();
 
 if (location.protocol === "file:") {
-  if (window.SIM_RESULT) installResult(window.SIM_RESULT);
+  if (window.SIM_RESULT) {
+    if (window.SIM_RESULT.bundle) openResultBundle(window.SIM_RESULT.bundle).catch(err => setStatus(err.message));
+    else installResult(window.SIM_RESULT);
+  }
   else setStatus("No saved engine result. Run a simulation using start_ui.bat or sim-ui.exe first.");
   cfgNameSel.disabled = true;
   document.getElementById("btnRefreshIni").disabled = true;
-  document.getElementById("btnOpenIni").disabled = true;
 }
+
+async function openResultBundle(bundle, request = ++resultLoadRequest) {
+  const prepared = await prepareBundle(bundle);
+  if (request !== resultLoadRequest) return;
+  const previous = { ...ORBIT_CFG, stations: STATIONS, terminals: TERMINALS };
+  try {
+    updateOrbitConfig({ ...prepared.config, minEl: prepared.config.minimumElevation });
+    const trial = replaySnapshot(0);
+    if (trial.nodes.some(p => !p.every(Number.isFinite))) throw new Error("설정으로 위치를 계산할 수 없습니다.");
+  } catch (err) { updateOrbitConfig(previous); throw err; }
+  installResult(prepared);
+  document.getElementById("csvSource").textContent = `실행 ID: ${prepared.runId} · CSV ${prepared.routes.length.toLocaleString("ko-KR")}개 · 설정 포함`;
+  setStatus(bundle.manifest.provenance === "manual-import-unverified" ? "가져온 CSV·INI로 지도를 재현합니다. 수동 등록 자료이므로 실행 당시 설정인지 확인해 주세요." : "실행 당시 보관한 CSV·INI로 지도를 재현합니다.");
+}
+document.getElementById("resultFolder").onchange = async e => {
+  const selection = [...e.target.files]; e.target.value = "";
+  if (!selection.length) return;
+  const request = ++resultLoadRequest;
+  try {
+    const fileMap = new Map();
+    for (const file of selection) {
+      const relative = file.webkitRelativePath.split("/").slice(1).join("/");
+      if (relative === "manifest.json" || relative.endsWith(".ini") || relative.endsWith(".csv")) {
+        const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await file.arrayBuffer());
+        fileMap.set(relative, text);
+      }
+    }
+    if (!fileMap.has("manifest.json")) throw new Error("manifest.json이 있는 실행 결과 폴더를 선택하세요.");
+    const manifest = JSON.parse(fileMap.get("manifest.json").replace(/^\uFEFF/, ""));
+    await openResultBundle({ manifest, files: Object.fromEntries(fileMap) }, request);
+  } catch (err) { if (request === resultLoadRequest) setStatus(`결과를 불러오지 못했습니다: ${err.message} 기존 화면을 유지합니다.`); }
+};

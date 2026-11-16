@@ -1,0 +1,24 @@
+{
+  "format": "florasat-csv-ini-v1",
+  "runId": "reference-dijkstra",
+  "createdAt": "2026-11-16T04:53:47.020640+00:00",
+  "configName": "Dijkstra132",
+  "runNumber": 0,
+  "entryIni": "config/simulations/Dijkstra132/omnetpp.ini",
+  "csvPath": "routes.csv",
+  "profile": "leo-dijkstra-delta-v1",
+  "modelHash": "fe5550651103f796a211ab098754049544714ecf96bb69ace6d1823675b0f179",
+  "provenance": "regression-fixture",
+  "command": [],
+  "overrides": {},
+  "files": {
+    "routes.csv": "ce186978b5b6e6234b681738e6682c00e5b04cc6bec6a43c90c6c2ad440faba8",
+    "config/simulations/Dijkstra132/stations/EsaDsn-Mobiles.ini": "3ea816e5e5f65b602cf2b2b449972f2236e8792c381ab132285198b025bc443f",
+    "config/simulations/Custom_default/devices/WorldWide-30.ini": "3382440f0ab16ffd0c712a40f9d904dd5d725abcc7d22208e9527a75214d3a19",
+    "config/simulations/Custom_default/configurations/StatisticRecording.ini": "f51e688f4fab280d67c4bec5005d08b009db6a08ef4da0422255967d3c905dd6",
+    "config/simulations/Custom_default/configurations/BlindTx.ini": "e9d12dcc52f9453911ec5603b6ccdcc000e55aa5eff47ad5472bc7eba081e919",
+    "config/simulations/Custom_default/configurations/BandSelection.ini": "d96fcf053b6b411574827cd3cbf38a10980192a1ef00fc311c4f80656427b7e8",
+    "config/simulations/Custom_default/configurations/Services.ini": "454793cb815c91c7814b8df579cd3ba2917873fe04aa7a1af267cbbd4a9c63c9",
+    "config/simulations/Dijkstra132/omnetpp.ini": "6e044e810b428b78c1a31bef2d5582cf1c791c8939cd7ca38d34c946878dc502"
+  }
+}

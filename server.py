@@ -18,6 +18,7 @@ import tempfile
 import threading
 import urllib.parse
 import webbrowser
+from result_bundle import content_hash, make_bundle, write_bundle
 
 BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 LOCAL_INI = os.path.join(BASE_DIR, "data", "omnetpp.ini")
@@ -221,14 +222,14 @@ def read_ini_config(config_name=None, entry_path=None):
     desc = next((c["description"] for c in configs if c["name"] == active), "")
 
     return {
-        "iniPath": INI_PATH,
+        "iniPath": entry_path or INI_PATH,
         "leoFound": bool(LEO_DIR),
         "leoDir": LEO_DIR,
         "activeConfig": active,
         "description": desc,
         "extends": extends.get(active, []),
         "chain": chain,
-        "configs": [{**c, "extends": extends.get(c["name"], [])} for c in configs],
+        "configs": [{**c, "extends": extends.get(c["name"], [])} for c in configs if c["name"] in {"Dijkstra132", "Dijkstra132Hop", "Dijkstra132Pair", "Dijkstra132StationsOnly"}],
         "ownEntries": [{"k": k, "v": v} for k, v in sections.get(active, [])],
         "effectiveEntries": list(resolved.values()),
         "simTimeLimit": get_num(["sim-time-limit"], 600.0, _time_sec),
@@ -329,31 +330,34 @@ def export_offline_result(result):
 
 
 def run_simulation(config_name="Dijkstra132"):
+    if config_name not in {"Dijkstra132", "Dijkstra132Hop", "Dijkstra132Pair", "Dijkstra132StationsOnly"}:
+        raise ValueError("This replay version supports the Dijkstra ground-node scenarios only")
     if not RUN_LOCK.acquire(blocking=False):
         raise RuntimeError("Another simulation is running")
     try:
         files, digest = capture_inputs()
-        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8]
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex
         run_dir = Path(BASE_DIR, "data", "runs", run_id)
         run_dir.mkdir(parents=True)
-        # Keep the exact input tree alongside results; do not overwrite the supplied project.
-        for name, data in files.items():
-            target = run_dir / "inputs" / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-        cfg = read_ini_config(config_name, str(run_dir / "inputs/simulations/Dijkstra132/omnetpp.ini"))
+        # Validate the selected config against the exact captured tree, never a changing source folder.
+        with tempfile.TemporaryDirectory() as tmp_inputs:
+            from result_bundle import ini_dependencies
+            for name, data in ini_dependencies(files).items():
+                target = Path(tmp_inputs, name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+            read_ini_config(config_name, str(Path(tmp_inputs, "simulations/Dijkstra132/omnetpp.ini")))
+        source_files = {name: data for name, data in files.items() if name.startswith("src/") and Path(name).suffix in {".cc", ".cpp", ".c", ".h", ".hpp", ".ned", ".msg"}}
+        profile = json.loads(Path(BASE_DIR, "replay-model.json").read_text(encoding="utf-8"))
+        if content_hash(source_files) != profile["modelHash"]:
+            raise ValueError("원본 모델 버전이 현재 지도 재현 버전과 다릅니다. 원본은 수정하지 않았습니다.")
         image = ensure_docker_image(files, digest)
-        script = (
-            "source /root/omnetpp/setenv >/dev/null 2>&1 && "
-            "source /opt/inet4.5/setenv >/dev/null 2>&1 && "
-            "mkdir -p results && "
-            "opp_run -u Cmdenv -c " + shlex.quote(config_name) +
-            " -n ../../src:..:/opt/inet4.5/src -l ../../src/flora -l /opt/inet4.5/src/INET omnetpp.ini "
-            "'--*.mapDataSource.routeLogFile=\"results/routes.csv\"' "
-            "'--*.mapDataSource.stateLogFile=\"results/states.jsonl\"' "
-            "'--*.mapDataSource.stateLogInterval=1s' >results/run.log 2>&1; "
-            "status=$?; tar -cf - results; exit $status"
-        )
+        opp_args = ["opp_run", "-u", "Cmdenv", "-c", config_name, "-r", "0", "-n", "../../src:..:/opt/inet4.5/src",
+                    "-l", "../../src/flora", "-l", "/opt/inet4.5/src/INET", "omnetpp.ini",
+                    '--*.mapDataSource.routeLogFile="results/routes.csv"']
+        script = ("source /root/omnetpp/setenv >/dev/null 2>&1 && "
+                  "source /opt/inet4.5/setenv >/dev/null 2>&1 && mkdir -p results && " + shlex.join(opp_args) +
+                  " >results/run.log 2>&1; status=$?; tar -cf - results; exit $status")
         container = "florasat-ui-" + run_id.lower()
         try:
             proc = subprocess.run(["wsl", "--cd", "~", "-e", "docker", "run", "--rm", "--name", container,
@@ -373,14 +377,14 @@ def run_simulation(config_name="Dijkstra132"):
             log = run_dir / "results/run.log"
             raise RuntimeError((log.read_text(errors="replace") if log.exists() else proc.stderr.decode(errors="replace"))[-12000:])
         raw = (run_dir / "results/routes.csv").read_bytes()
-        routes = parse_routes_csv(raw.decode("utf-8"))
-        states = [json.loads(line) for line in (run_dir / "results/states.jsonl").read_text().splitlines() if line]
-        if not states:
-            raise RuntimeError("Engine state output is empty")
-        result = {"ok": True, "routes": routes, "states": states, "config": cfg,
-                  "runId": run_id, "inputHash": digest, "image": image,
-                  "csvHash": hashlib.sha256(raw).hexdigest(), "createdAt": datetime.now(timezone.utc).isoformat(),
-                  "overrides": {"routeLogFile": "results/routes.csv", "stateLogFile": "results/states.jsonl", "stateLogInterval": "1s"}}
+        parse_routes_csv(raw.decode("utf-8-sig"))
+        bundle, payload = make_bundle(files, raw, config_name, content_hash(source_files), run_id=run_id,
+                                      command=opp_args)
+        bundle["manifest"]["image"] = image
+        bundle["manifest"]["imageInputHash"] = digest
+        bundle["manifest"]["outputOverrides"] = {"routeLogFile": "results/routes.csv"}
+        write_bundle(run_dir, bundle, payload)
+        result = {"ok": True, "bundle": bundle, "runId": run_id}
         (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, allow_nan=False), encoding="utf-8")
         export_offline_result(result)
         pointer = Path(BASE_DIR, "data", "latest.json")
@@ -438,10 +442,6 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
                 raise ValueError("Expected JSON object")
         except (ValueError, UnicodeError) as exc:
             return self.send_json({"error": str(exc)}, 400)
-
-        if self.path == "/api/open-ini":
-            os.startfile(INI_PATH)
-            return self.send_json({"ok": True, "path": INI_PATH})
 
         if self.path == "/api/run":
             try:

@@ -1,0 +1,33 @@
+import hashlib
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from result_bundle import ini_dependencies, make_bundle, write_bundle, ENTRY
+
+class BundleTests(unittest.TestCase):
+    def test_recursive_ini_preserves_bytes_and_relative_tree(self):
+        entry=b'[General]\ninclude stations/nodes.ini\ninclude ../shared.ini\n'
+        files={ENTRY:entry,'simulations/Dijkstra132/stations/nodes.ini':b'# stations\r\n','simulations/shared.ini':b'# shared\n'}
+        bundle,payload=make_bundle(files,b'csv','Dijkstra132','model',run_id='test-run-id')
+        with tempfile.TemporaryDirectory() as tmp:
+            write_bundle(tmp,bundle,payload)
+            for name,data in payload.items():
+                self.assertEqual(Path(tmp,name).read_bytes(),data)
+                self.assertEqual(bundle['manifest']['files'][name],hashlib.sha256(data).hexdigest())
+            self.assertEqual(Path(tmp,'config',ENTRY).read_bytes(),entry)
+            self.assertNotIn('src', [p.name for p in Path(tmp).iterdir()])
+
+    def test_missing_cycles_and_external_includes_fail(self):
+        for source in [b'include missing.ini',b'include omnetpp.ini',b'include /absolute.ini',b'include ../../../../outside.ini']:
+            with self.subTest(source=source),self.assertRaises(ValueError):
+                ini_dependencies({ENTRY:source})
+
+    def test_each_run_gets_unique_id(self):
+        files={ENTRY:b'[General]'}
+        a,_=make_bundle(files,b'csv','Dijkstra132','model')
+        b,_=make_bundle(files,b'csv','Dijkstra132','model')
+        self.assertNotEqual(a['manifest']['runId'],b['manifest']['runId'])
+        self.assertEqual(a['manifest']['files'],b['manifest']['files'])
+
+if __name__=='__main__': unittest.main()

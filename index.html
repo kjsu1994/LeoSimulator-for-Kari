@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>LEO Satellite Routing Simulator UI (Dijkstra132)</title>
-  <link rel="stylesheet" href="style.css?v=20261116-csv-state-3">
+  <link rel="stylesheet" href="style.css?v=20261116-bundle-1">
 </head>
 <body>
   <header class="topbar">
@@ -25,7 +25,8 @@
         <option value="30">30x</option>
         <option value="60">60x</option>
       </select>
-      <label class="file-btn">📂<input id="csvInput" type="file" accept=".csv" hidden></label>
+      <label class="file-btn">실행 결과 열기<input id="resultFolder" type="file" webkitdirectory multiple hidden></label>
+      <label class="file-btn">CSV만 열기<input id="csvInput" type="file" accept=".csv" hidden></label>
     </div>
   </header>
 
@@ -33,10 +34,10 @@
     <section class="map-wrap">
       <div class="map-summary" aria-label="Simulation status">
         <dl class="map-metrics">
-          <div><dt>Replay time</dt><dd id="mapTime">--</dd></div>
+          <div><dt>재생 시각</dt><dd id="mapTime">--</dd></div>
           <div><dt>Satellites / ISL / Ground links</dt><dd id="mapNetwork">--</dd></div>
-          <div><dt>Station traffic: sent / received</dt><dd id="mapTraffic">--</dd></div>
-          <div><dt>Measured mean end-to-end</dt><dd id="mapMeasured">--</dd></div>
+          <div><dt>실제 송신 / 수신</dt><dd id="mapTraffic">--</dd></div>
+          <div><dt>실측 종단 간 지연</dt><dd id="mapMeasured">--</dd></div>
         </dl>
         <div class="map-context"><span id="mapRouting"></span><span id="mapSample"></span></div>
       </div>
@@ -73,7 +74,6 @@
             <div class="scenario-detail-content">
               <p class="settings-note">공통 설정과 상속된 설정을 확인할 수 있습니다. 최종 적용 값은 시뮬레이션 엔진에서 결정됩니다.</p>
           <div id="cfgProfile" class="cfg-profile">
-            <button id="btnOpenIni" type="button" class="open-config">설정 파일 열기</button>
             <div id="cfgIniSrc" class="ini-src">연결 확인 중...</div>
             <div id="cfgDesc" class="cfg-desc" hidden></div>
             <div id="cfgExtends" class="cfg-extends" hidden></div>
@@ -140,9 +140,10 @@
     </aside>
   </main>
 
-  <script src="data/latest_result.js?v=20261116-csv-state-3"></script>
-  <script src="csv.js?v=20261116-csv-state-3"></script>
-  <script src="orbit.js?v=20261116-csv-state-3"></script>
-  <script src="app.js?v=20261116-csv-state-3"></script>
+  <script src="data/latest_result.js?v=20261116-bundle-1"></script>
+  <script src="csv.js?v=20261116-bundle-1"></script>
+  <script src="bundle.js?v=20261116-bundle-1"></script>
+  <script src="orbit.js?v=20261116-bundle-1"></script>
+  <script src="app.js?v=20261116-bundle-1"></script>
 </body>
 </html>

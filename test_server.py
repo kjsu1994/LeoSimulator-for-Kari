@@ -33,7 +33,7 @@ class DataTests(unittest.TestCase):
     def test_unknown_config_cannot_reach_shell(self):
         with self.assertRaises(ValueError):
             server.read_ini_config("Dijkstra132; touch injected")
-        self.assertEqual(server.read_ini_config("Dijkstra132Hop")["metric"], "hop")
+        self.assertEqual(server.read_ini_config("Dijkstra132Hop")["metric"], "delay")
 
     def test_offline_export_preserves_result(self):
         with tempfile.TemporaryDirectory() as tmp:
