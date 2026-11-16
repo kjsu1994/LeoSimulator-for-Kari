@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>LEO Satellite Routing Simulator UI (Dijkstra132)</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=20261116-map-state-2">
 </head>
 <body>
   <header class="topbar">
@@ -31,36 +31,59 @@
 
   <main class="layout">
     <section class="map-wrap">
+      <div class="map-summary" aria-label="Simulation status">
+        <dl class="map-metrics">
+          <div><dt>Replay time</dt><dd id="mapTime">--</dd></div>
+          <div><dt>Satellites / ISL / Ground links</dt><dd id="mapNetwork">--</dd></div>
+          <div><dt>Station traffic: sent / received</dt><dd id="mapTraffic">--</dd></div>
+          <div><dt>Measured mean end-to-end</dt><dd id="mapMeasured">--</dd></div>
+        </dl>
+        <div class="map-context"><span id="mapRouting"></span><span id="mapSample"></span></div>
+      </div>
+      <div class="map-viewport">
       <canvas id="mapCanvas" width="2160" height="1080"></canvas>
       <div id="tooltip" class="tooltip" hidden></div>
+      </div>
     </section>
 
     <aside class="sidebar">
       <div class="card sim-runner">
         <div class="runner-head">
-          <span>📄 omnetpp.ini 시나리오</span>
+          <span>시나리오</span>
           <div class="head-btns">
-            <button id="btnRefreshIni" type="button" title="omnetpp.ini 다시 읽기">🔄</button>
-            <button id="btnOpenIni" type="button" title="윈도우 편집기로 omnetpp.ini 열기">📝 .ini 열기</button>
+            <button id="btnRefreshIni" type="button" title="설정 새로고침" aria-label="설정 새로고침">🔄</button>
           </div>
         </div>
         <div class="cfg-grid">
-          <label class="span-2">시나리오 (omnetpp.ini [Config])
+          <label class="span-2">실행 구성
             <select id="cfgName">
               <option value="Dijkstra132">Dijkstra132</option>
             </select>
           </label>
-          <div id="cfgProfile" class="cfg-profile span-2">
+          <dl class="scenario-facts span-2" aria-label="시나리오 정보">
+            <div><dt>위성 구성</dt><dd id="scenarioConstellation">—</dd></div>
+            <div><dt>고도 · 경사각</dt><dd id="scenarioOrbit">—</dd></div>
+            <div><dt>실행 시간</dt><dd id="scenarioDuration">—</dd></div>
+            <div><dt>경로 선택</dt><dd id="scenarioRouting">—</dd></div>
+            <div><dt>전송 주기 · 패킷 크기</dt><dd id="scenarioTraffic">—</dd></div>
+            <div><dt>IoT 단말</dt><dd id="scenarioTerminals">—</dd></div>
+          </dl>
+          <details id="scenarioDetails" class="scenario-details span-2">
+            <summary>상세 설정</summary>
+            <div class="scenario-detail-content">
+              <p class="settings-note">공통 설정과 상속된 설정을 확인할 수 있습니다. 최종 적용 값은 시뮬레이션 엔진에서 결정됩니다.</p>
+          <div id="cfgProfile" class="cfg-profile">
+            <button id="btnOpenIni" type="button" class="open-config">설정 파일 열기</button>
             <div id="cfgIniSrc" class="ini-src">연결 확인 중...</div>
             <div id="cfgDesc" class="cfg-desc" hidden></div>
             <div id="cfgExtends" class="cfg-extends" hidden></div>
             <pre id="cfgOwnIni" class="cfg-own"></pre>
           </div>
-          <div class="ini-toolbar span-2">
+          <div class="ini-toolbar">
             <input id="iniFilter" type="text" placeholder="키 / 값 / 섹션 검색 (예: metric, traffic, planeCount)">
             <label class="ini-chk"><input id="chkShowNodes" type="checkbox"> station/terminal 포함</label>
           </div>
-          <div class="ini-table-wrap span-2">
+          <div class="ini-table-wrap">
             <table id="iniTable">
               <thead>
                 <tr><th>INI Key</th><th>Value</th><th>Section</th></tr>
@@ -68,25 +91,28 @@
               <tbody></tbody>
             </table>
           </div>
-          <div id="iniCount" class="ini-count span-2"></div>
+          <div id="iniCount" class="ini-count"></div>
+            </div>
+          </details>
         </div>
         <div class="runner-actions">
-          <button id="btnRunSim" type="button" class="btn-primary">🚀 선택 시나리오 실행 (opp_run)</button>
+          <button id="btnRunSim" type="button" class="btn-primary">선택 시나리오 실행</button>
         </div>
+        <a id="resultFiles" hidden download></a>
         <div id="runStatus" class="run-status" hidden></div>
       </div>
 
       <div class="card kpis">
         <div><small>Satellites / ISL</small><strong id="kpiSat">132 / 264</strong></div>
         <div><small id="kpiGslLabel">Active GSL (≥10°)</small><strong id="kpiGsl">36</strong></div>
-        <div><small>Delivered (≤ t)</small><strong id="kpiPkts">5416</strong></div>
-        <div><small>Avg Delay / Hops</small><strong id="kpiDelay">47.6 ms / 3.4</strong></div>
+        <div><small>계획 경로 (현재 / 전체)</small><strong id="kpiPkts">5416</strong></div>
+        <div><small>Predicted propagation / ISL hops</small><strong id="kpiDelay">47.6 ms / 3.4</strong></div>
       </div>
 
       <div class="card toggles">
         <label><input type="checkbox" id="chkIsl" checked> ISLs</label>
         <label><input type="checkbox" id="chkGsl" checked> GSLs</label>
-        <label><input type="checkbox" id="chkFoot" checked> GSL Footprints</label>
+        <label><input type="checkbox" id="chkFoot" checked> Coverage (geometric estimate)</label>
         <label><input type="checkbox" id="chkRoutes" checked> Active Routes</label>
         <label><input type="checkbox" id="chkLabels" checked> Labels</label>
       </div>
@@ -98,13 +124,13 @@
 
       <div class="card log-card">
         <div class="log-head">
-          <span>Recent Routed Packets (30s window)</span>
+          <span>Recent Planned Routes</span>
           <small id="activeCount">0 active</small>
         </div>
         <div class="table-scroll">
           <table id="routeTable">
             <thead>
-              <tr><th>Time</th><th>Source → Dest</th><th>Hops</th><th>Delay</th><th>Path</th></tr>
+              <tr><th>Time</th><th>Source → Dest</th><th>Hops</th><th>Predicted propagation</th><th>Path</th></tr>
             </thead>
             <tbody></tbody>
           </table>
@@ -113,8 +139,9 @@
     </aside>
   </main>
 
-  <script src="data/routes_data.js"></script>
-  <script src="orbit.js"></script>
-  <script src="app.js"></script>
+  <script src="data/latest_result.js?v=20261116-map-state-2"></script>
+  <script src="csv.js?v=20261116-map-state-2"></script>
+  <script src="orbit.js?v=20261116-map-state-2"></script>
+  <script src="app.js?v=20261116-map-state-2"></script>
 </body>
 </html>

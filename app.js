@@ -8,7 +8,31 @@ const earthImg = new Image();
 earthImg.src = "data/earth.png";
 earthImg.onload = () => render();
 
-let routes = window.ROUTES || [];
+let routes = []; // Legacy files have no matching configuration/state evidence.
+let states = [], resultMeta = null, loadedConfigKey = "";
+function stateAt(t) {
+  let lo = 0, hi = states.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (states[mid].t <= t) lo = mid + 1; else hi = mid; }
+  return lo ? states[lo - 1] : null;
+}
+function clearResult() {
+  routes = []; states = []; resultMeta = null; selectedRouteId = null; simTime = 0;
+  playing = false; document.getElementById("btnPlay").textContent = "Play";
+  document.getElementById("resultFiles").hidden = true;
+}
+function installResult(result) {
+  clearResult();
+  routes = result.routes; states = result.states; resultMeta = result;
+  simTime = states.length ? Math.min(1210, states[states.length - 1].t) : 0;
+  applyLoadedConfig(result.config, { result: true });
+  syncTimeBounds(states.length ? states[states.length - 1].t : 0);
+  setStatus(`Run ${result.runId} | engine snapshots | input ${result.inputHash.slice(0, 12)} | ${result.createdAt}`);
+  const download = document.getElementById("resultFiles");
+  download.hidden = false;
+  download.href = `data/runs/${result.runId}/results/routes.csv`;
+  download.textContent = `Original CSV | run ${result.runId} | SHA-256 ${result.csvHash.slice(0, 16)}`;
+  render();
+}
 let simTime = routes.length ? Math.min(1210.0, routes[routes.length - 1][0]) : 0.0;
 let maxSimTime = routes.length ? Math.max(10, Math.ceil(routes[routes.length - 1][0])) : 600.0;
 let playing = false, speed = 10, selectedRouteId = null, lastFrame = 0;
@@ -129,60 +153,33 @@ function render() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
   }
 
-  const sats = SATS.map(s => getSatState(s, simTime));
-  const gmst = sats[0].gmst;
-  const stStates = STATIONS.map(st => {
-    const p = getStationPos(st, simTime);
-    return { ...p, eci: siteEci(p.lat, p.lon, p.alt, gmst) };
-  });
-  lastSatStates = sats;
-  lastStationStates = stStates;
-
-  const gslLinks = [];
-  const gslSatSet = new Set();
-  for (const st of stStates) {
-    for (const sat of sats) {
-      if (getElevationDeg(st.eci, sat) >= ORBIT_CFG.minEl) {
-        gslLinks.push([st, sat]);
-        gslSatSet.add(sat.idx);
-      }
-    }
-  }
-
-  if (document.getElementById("chkFoot").checked) {
-    gslSatSet.forEach(idx => drawFootprint(sats[idx].lat, sats[idx].lon, sats[idx].alt));
-  }
-
+  const snapshot = stateAt(simTime);
+  const sats = snapshot ? snapshot.nodes.slice(0, snapshot.numSats).map((p, idx) => ({ idx, lat: p[0], lon: p[1], alt: p[2] })) : [];
+  const stStates = snapshot ? snapshot.nodes.slice(snapshot.numSats, snapshot.numSats + snapshot.numStations).map((p, id) => {
+    const st = STATIONS.find(s => s.id === id) || { id, name: `GS${id}`, mobile: false };
+    return { ...st, lat: p[0], lon: p[1], alt: p[2] };
+  }) : [];
+  const terminalStates = snapshot ? snapshot.nodes.slice(snapshot.numSats + snapshot.numStations).map((p, id) => ({ id, lat: p[0], lon: p[1], alt: p[2] })) : [];
+  lastSatStates = sats; lastStationStates = stStates;
+  const gslLinks = [], gslSatSet = new Set();
   let islCount = 0;
-  if (document.getElementById("chkIsl").checked) {
-    for (const s of sats) {
-      if (PLANES > 1) {
-        const nextPlane = sats[((s.plane + 1) % PLANES) * SATS_PER_PLANE + s.satInPlane];
-        if (nextPlane) {
-          drawWrappedLine(s.lon, s.lat, nextPlane.lon, nextPlane.lat, "#9aa4b1", 1, 0.6);
-          islCount++;
-        }
-      }
-      if (SATS_PER_PLANE > 1) {
-        const nextInPlane = sats[s.plane * SATS_PER_PLANE + ((s.satInPlane + 1) % SATS_PER_PLANE)];
-        if (nextInPlane) {
-          drawWrappedLine(s.lon, s.lat, nextInPlane.lon, nextInPlane.lat, "#4f8fd6", 1, 0.8);
-          islCount++;
-        }
-      }
-    }
-  } else {
-    islCount = (PLANES > 1 ? sats.length : 0) + (SATS_PER_PLANE > 1 ? sats.length : 0);
-  }
-
-  if (document.getElementById("chkGsl").checked) {
-    for (const [st, sat] of gslLinks) {
-      drawWrappedLine(st.lon, st.lat, sat.lon, sat.lat, st.mobile ? "#00d0ff" : "#22b14c", 2, 0.9);
+  if (snapshot) for (const [a, b, kind] of snapshot.links) {
+    const from = snapshot.nodes[a], to = snapshot.nodes[b];
+    if (!from || !to) continue;
+    if (kind < 2) {
+      islCount++;
+      if (document.getElementById("chkIsl").checked) drawWrappedLine(from[1], from[0], to[1], to[0], kind === 0 ? "#4f8fd6" : "#9aa4b1", 1, 0.7);
+    } else {
+      gslLinks.push([a, b]); gslSatSet.add(b);
+      if (document.getElementById("chkGsl").checked) drawWrappedLine(from[1], from[0], to[1], to[0], kind === 3 ? "#00d0ff" : "#22b14c", 2, 0.9);
     }
   }
+  if (document.getElementById("chkFoot").checked) for (const idx of gslSatSet) {
+    const sat = sats[idx]; if (sat) drawFootprint(sat.lat, sat.lon, sat.alt);
+  }
 
-  const routeLifetime = ORBIT_CFG.routeLifetime || 30.0;
-  const maxRoutes = ORBIT_CFG.maxRoutes || 8;
+  const routeLifetime = ORBIT_CFG.routeLifetime;
+  const maxRoutes = Math.max(0, ORBIT_CFG.maxRoutes);
   const endIdx = upperBoundTime(simTime);
   const srcF = srcFilter.value, dstF = parseInt(dstFilter.value, 10);
   const windowRoutes = [];
@@ -195,11 +192,12 @@ function render() {
   const drawnRoutes = windowRoutes.slice(0, maxRoutes).reverse();
   const activeSatSet = new Set();
 
-  if (document.getElementById("chkRoutes").checked) {
+  if (snapshot && document.getElementById("chkRoutes").checked) {
     drawnRoutes.forEach((r, idx) => {
       const [t, rId, srcId, dstId, hops, ms, path, srcIsTerm] = r;
-      const srcSt = srcIsTerm ? (TERMINALS[srcId] || stStates[0]) : (stStates[srcId] || stStates[0]);
-      const dstSt = stStates[dstId] || stStates[0];
+      const srcSt = srcIsTerm ? terminalStates.find(s => s.id === srcId) : stStates.find(s => s.id === srcId);
+      const dstSt = stStates.find(s => s.id === dstId);
+      if (!srcSt || !dstSt || path.some(id => !sats[id])) return;
       const age = Math.max(0, simTime - t);
       const alpha = selectedRouteId === rId ? 1.0 : Math.max(0.15, 1.0 - age / routeLifetime);
       const color = ROUTE_COLORS[idx % ROUTE_COLORS.length];
@@ -238,7 +236,7 @@ function render() {
     }
   }
 
-  for (const tm of TERMINALS) {
+  for (const tm of terminalStates) {
     ctx.beginPath();
     ctx.arc(lonToX(tm.lon), latToY(tm.lat), 3.5, 0, TWOPI);
     ctx.fillStyle = "#ffe066";
@@ -280,20 +278,18 @@ function render() {
   const avgMs = endIdx ? (sumMs / endIdx).toFixed(1) : "0.0";
   const avgHops = endIdx ? (sumHops / endIdx).toFixed(1) : "0.0";
 
-  ctx.fillStyle = "rgba(0,0,0,0.65)";
-  ctx.fillRect(10, 10, 560, 120);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 20px sans-serif";
-  ctx.fillText(`t = ${simTime.toFixed(0)} s`, 22, 36);
-  ctx.fillText(`satellites ${sats.length}   ISL ${islCount}   ground links ${gslLinks.length}`, 22, 62);
-  ctx.fillText(`from stations ${endIdx} sent / ${endIdx} delivered, ${avgMs} ms`, 22, 88);
-  ctx.fillText(`routing ${ORBIT_CFG.routingType} (${ORBIT_CFG.metric})`, 22, 114);
+  document.getElementById("mapTime").textContent = `${simTime.toFixed(1)} s`;
+  document.getElementById("mapNetwork").textContent = snapshot ? `${sats.length} / ${islCount} / ${gslLinks.length}` : "N/A";
+  document.getElementById("mapTraffic").textContent = snapshot ? `${snapshot.sent} / ${snapshot.received}` : "N/A";
+  document.getElementById("mapMeasured").textContent = snapshot && snapshot.received ? `${(snapshot.delaySumSeconds * 1000 / snapshot.received).toFixed(2)} ms` : "N/A";
+  document.getElementById("mapRouting").textContent = `${resultMeta?.config.activeConfig || "CSV"} | ${ORBIT_CFG.routingType} | ${ORBIT_CFG.metric}`;
+  document.getElementById("mapSample").textContent = snapshot ? `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation` : "No engine state for this data";
 
   document.getElementById("timeLabel").textContent = `t = ${simTime.toFixed(1)} s`;
   document.getElementById("timeSlider").value = simTime;
-  document.getElementById("kpiSat").textContent = `${sats.length} / ${islCount}`;
-  document.getElementById("kpiGslLabel").textContent = `Active GSL (≥${ORBIT_CFG.minEl}°)`;
-  document.getElementById("kpiGsl").textContent = gslLinks.length;
+  document.getElementById("kpiSat").textContent = snapshot ? `${sats.length} / ${islCount}` : "N/A";
+  document.getElementById("kpiGslLabel").textContent = "Engine ground links";
+  document.getElementById("kpiGsl").textContent = snapshot ? gslLinks.length : "N/A";
   document.getElementById("kpiPkts").textContent = `${endIdx} / ${routes.length}`;
   document.getElementById("kpiDelay").textContent = `${avgMs} ms / ${avgHops}`;
   document.getElementById("activeCount").textContent = `${windowRoutes.length} in ${routeLifetime}s`;
@@ -301,7 +297,7 @@ function render() {
   const tbody = document.querySelector("#routeTable tbody");
   tbody.innerHTML = windowRoutes.slice(0, 25).map(r => {
     const [t, rId, srcId, dstId, hops, ms, path, srcIsTerm] = r;
-    const dstSt = stStates[dstId];
+    const dstSt = stStates.find(s => s.id === dstId) || STATIONS.find(s => s.id === dstId);
     const srcTag = srcIsTerm ? `T${srcId}` : `GS${srcId}`;
     const dstTag = (dstSt && dstSt.mobile) ? `M${dstId}` : `GS${dstId}`;
     const sel = selectedRouteId === rId ? " class='selected'" : "";
@@ -309,7 +305,7 @@ function render() {
       <td>${t.toFixed(1)}s</td>
       <td>${srcTag}→${dstTag}</td>
       <td>${hops}</td>
-      <td>${ms.toFixed(1)}ms</td>
+      <td title="First satellite: ${r[8]}; exit satellite: ${r[9]}; uplink: ${r[10]} ms; satellite-to-station: ${r[11]} ms; total: ${ms} ms">${ms.toFixed(1)}ms</td>
       <td class="path-cell" title="${path.join("-")}">${path.join("-")}</td>
     </tr>`;
   }).join("");
@@ -365,17 +361,9 @@ canvas.onmousemove = e => {
     }
   }
   if (!hit) {
-    for (const tm of TERMINALS) {
-      if (Math.hypot(lonToX(tm.lon) - mx, latToY(tm.lat) - my) < 9) {
-        hit = `IoT Terminal T${tm.id}\nLat: ${tm.lat.toFixed(2)}°, Lon: ${tm.lon.toFixed(2)}°`;
-        break;
-      }
-    }
-  }
-  if (!hit) {
     for (const s of lastSatStates) {
       if (Math.hypot(lonToX(s.lon) - mx, latToY(s.lat) - my) < 10) {
-        hit = `Satellite sat[${s.idx}] (Plane ${s.plane}, #${s.satInPlane})\nLat: ${s.lat.toFixed(2)}°, Lon: ${s.lon.toFixed(2)}°, Alt: ${s.alt.toFixed(0)}km`;
+        hit = `Satellite sat[${s.idx}] (engine snapshot)\nLat: ${s.lat.toFixed(2)}°, Lon: ${s.lon.toFixed(2)}°, Alt: ${s.alt.toFixed(0)}km`;
         break;
       }
     }
@@ -398,19 +386,12 @@ document.getElementById("csvInput").onchange = e => {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
-    const lines = ev.target.result.trim().split(/\r?\n/).slice(1);
-    // shortcut: assumes standard 11-column routes.csv format, upgrade if schema changes
-    routes = lines.filter(Boolean).map(l => {
-      const r = l.split(",");
-      const isTerm = r[2].startsWith("T");
-      const row = [
-        parseFloat(r[0]), parseInt(r[1], 10), parseInt(r[2].replace(/^[A-Z]+/, ""), 10),
-        parseInt(r[3], 10), parseInt(r[6], 10), parseFloat(r[9]), r[10].split("-").map(Number)
-      ];
-      if (isTerm) row.push(1);
-      return row;
-    });
-    if (routes.length) syncTimeBounds(Math.ceil(routes[routes.length - 1][0]));
+    try {
+      const parsed = parseRoutesCsv(ev.target.result);
+      clearResult(); routes = parsed;
+      syncTimeBounds(routes.length ? routes[routes.length - 1][0] : 0);
+      setStatus("External CSV: configuration and coordinates unverified. Planned route table only.");
+    } catch (err) { setStatus(`CSV error: ${err.message}`); }
     render();
   };
   reader.readAsText(file);
@@ -448,6 +429,7 @@ function renderIniTable() {
     const ov = e.sec !== "General" ? " class=\"ini-override\"" : "";
     return `<tr${ov}><td class="ini-k" title="${escHtml(e.k)}">${escHtml(e.k)}</td><td class="ini-v" title="${escHtml(e.v)}">${escHtml(e.v)}</td><td class="ini-s">[${escHtml(e.sec)}]</td></tr>`;
   }).join("");
+  document.getElementById("iniTable").title = "INI preview only; OMNeT++ resolves wildcard precedence and expressions. Engine snapshots are authoritative.";
   document.getElementById("iniCount").textContent = `표시 ${rows.length} / 전체 ${currentEffectiveEntries.length}개 INI 키 (파란 강조 = 상속/시나리오 설정)`;
 }
 
@@ -455,6 +437,17 @@ iniFilter.oninput = renderIniTable;
 chkShowNodes.onchange = renderIniTable;
 
 function updateProfileBox(cfg, highlight) {
+  const entries = cfg.effectiveEntries || [];
+  const value = key => entries.find(e => e.k === key)?.v;
+  document.getElementById("scenarioConstellation").textContent = cfg.numSatellites == null ? "—" : `${cfg.numSatellites}기 · ${cfg.planes}개 궤도면`;
+  document.getElementById("scenarioOrbit").textContent = cfg.altitude == null ? "—" : `${cfg.altitude} km · ${cfg.inclination}°`;
+  document.getElementById("scenarioDuration").textContent = cfg.simTimeLimit == null ? "—" : `${cfg.simTimeLimit.toLocaleString("ko-KR")}초`;
+  const routing = { delay: "지연 최소", hop: "홉 수 최소" };
+  document.getElementById("scenarioRouting").textContent = routing[cfg.metric] || cfg.metric || "—";
+  const interval = value("*.station[*].traffic.sendInterval");
+  const size = value("*.station[*].traffic.packetSize");
+  document.getElementById("scenarioTraffic").textContent = interval && size ? `${interval} · ${size}` : (cfg.activeConfig ? "노드별 설정" : "—");
+  document.getElementById("scenarioTerminals").textContent = cfg.numTerminals == null ? "—" : (cfg.numTerminals === 0 ? "사용 안 함" : `${cfg.numTerminals}개`);
   const iniSrc = document.getElementById("cfgIniSrc");
   const descEl = document.getElementById("cfgDesc");
   const extEl = document.getElementById("cfgExtends");
@@ -465,7 +458,7 @@ function updateProfileBox(cfg, highlight) {
     iniSrc.title = cfg.iniPath;
     iniSrc.style.color = cfg.leoFound ? "#69f0ae" : "#ffe066";
   } else if (!location.protocol.startsWith("http")) {
-    iniSrc.textContent = "ℹ️ 로컬 HTML 모드 (기본 내장 orbit.js · 전체 INI 확인은 sim-ui.exe 실행)";
+    iniSrc.textContent = "ℹ️ 로컬 HTML 모드";
     iniSrc.style.color = "#8da2c0";
   }
 
@@ -499,6 +492,14 @@ function applyLoadedConfig(cfg, opts = {}) {
     cfgNameSel.dataset.loaded = "1";
   }
 
+  const configKey = JSON.stringify([cfg.activeConfig, cfg.effectiveEntries]);
+  const resultKey = resultMeta ? JSON.stringify([resultMeta.config.activeConfig, resultMeta.config.effectiveEntries]) : "";
+  const showingPreviousRun = !!resultMeta && !opts.result && resultKey !== configKey;
+  if (showingPreviousRun) {
+    setStatus(`지도에는 [${resultMeta.config.activeConfig}]의 마지막 실행 결과가 표시됩니다. 선택한 [${cfg.activeConfig}] 설정을 반영하려면 실행하세요.`);
+  }
+  loadedConfigKey = configKey;
+  if (opts.result || !resultMeta) {
   updateOrbitConfig({
     altitude: cfg.altitude, inclination: cfg.inclination, minEl: cfg.minimumElevation,
     numSatellites: cfg.numSatellites, planes: cfg.planes, phasing: cfg.phasing,
@@ -508,19 +509,20 @@ function applyLoadedConfig(cfg, opts = {}) {
   });
   if (Array.isArray(cfg.stations) || Array.isArray(cfg.terminals)) populateFilters();
   if (cfg.simTimeLimit) syncTimeBounds(cfg.simTimeLimit);
+  }
 
-  const active = cfg.activeConfig || cfgNameSel.value;
+  const active = resultMeta?.config.activeConfig || cfg.activeConfig || cfgNameSel.value;
   const rShort = (ORBIT_CFG.routingType || "Routing").replace(/^Sat_Net_|Routing$/g, "");
   document.title = `FLoRaSat LEO Simulator (${active})`;
   document.getElementById("topBadge").textContent =
-    `${active} · Walker-Delta ${SATS.length}/${ORBIT_CFG.planes}/${ORBIT_CFG.phasing} · ${ORBIT_CFG.altitude}km · ${ORBIT_CFG.inclination}° · ${rShort} (${ORBIT_CFG.metric})`;
+    `${active} · Walker-Delta ${ORBIT_CFG.numSatellites}/${ORBIT_CFG.planes}/${ORBIT_CFG.phasing} · ${ORBIT_CFG.altitude}km · ${ORBIT_CFG.inclination}° · ${rShort} (${ORBIT_CFG.metric})`;
 
   currentEffectiveEntries = Array.isArray(cfg.effectiveEntries) ? cfg.effectiveEntries : [];
   updateProfileBox(cfg, !!opts.announce);
   renderIniTable();
 
-  if (opts.announce) {
-    setStatus(`📌 [${active}] .ini 로드됨 (직접 설정 ${(cfg.ownEntries || []).length}줄 · 유효 키 ${currentEffectiveEntries.length}개)`);
+  if (opts.announce && !showingPreviousRun) {
+    setStatus(`📌 [${active}] .ini 로드됨 (직접 설정 ${(cfg.ownEntries || []).length}줄 · preview keys ${currentEffectiveEntries.length}개)`);
   }
   render();
 }
@@ -529,10 +531,18 @@ updateProfileBox({}, false);
 renderIniTable();
 
 if (location.protocol.startsWith("http")) {
-  const fetchConfig = (cfg, announce = false) =>
-    fetch(cfg ? `/api/config?config=${encodeURIComponent(cfg)}` : "/api/config")
-      .then(r => r.json()).then(d => applyLoadedConfig(d, { announce })).catch(() => {});
-  fetchConfig();
+  let configRequest = 0;
+  const fetchConfig = (cfg, announce = false) => {
+    const request = ++configRequest;
+    return fetch(cfg ? `/api/config?config=${encodeURIComponent(cfg)}` : "/api/config", { cache: "no-store" })
+      .then(r => { if (!r.ok) throw new Error("설정을 불러오지 못했습니다."); return r.json(); })
+      .then(d => { if (request === configRequest) applyLoadedConfig(d, { announce }); })
+      .catch(err => { if (request === configRequest) setStatus(err.message); });
+  };
+  if (window.SIM_RESULT) installResult(window.SIM_RESULT);
+  fetch("/api/result", { cache: "no-store" }).then(r => { if (!r.ok) throw new Error("저장 결과를 불러오지 못했습니다."); return r.json(); })
+    .then(result => { if (configRequest !== 0) return; if (result && result.runId !== resultMeta?.runId) installResult(result); return fetchConfig(cfgNameSel.dataset.loaded ? cfgNameSel.value : ""); })
+    .catch(err => { setStatus(resultMeta ? "저장된 실행 결과를 표시합니다. 서버 연결을 확인해 주세요." : err.message); });
   cfgNameSel.onchange = () => fetchConfig(cfgNameSel.value, true);
   document.getElementById("btnRefreshIni").onclick = () => fetchConfig(cfgNameSel.value, true);
   window.addEventListener("focus", () => fetchConfig(cfgNameSel.dataset.loaded ? cfgNameSel.value : "", false));
@@ -553,16 +563,14 @@ document.getElementById("btnRunSim").onclick = async e => {
     return setStatus("⚠️ 시뮬레이션 실행은 sim-ui.exe에서 동작합니다.");
   }
   btn.disabled = true;
-  setStatus(`⏳ [${cfgName}] omnetpp.ini 그대로 OMNeT++ 시뮬레이션 실행 중...`);
+  setStatus(`Running [${cfgName}] from captured inputs (state output enabled)...`);
   try {
     const t0 = performance.now();
     const res = await fetch("/api/run", { method: "POST", body: JSON.stringify({ configName: cfgName }) }).then(r => r.json());
     if (!res.ok) throw new Error(res.error || "Simulation failed");
-    routes = res.routes;
-    simTime = routes.length ? routes[0][0] : 0;
-    applyLoadedConfig(res.config, { announce: false });
+    installResult(res);
     const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-    setStatus(`✅ [${cfgName}] 완료! (${elapsed}s 소요 · 패킷 ${routes.length}개 로드됨)`);
+    setStatus(`Completed [${cfgName}] | run ${res.runId} | ${elapsed}s | ${routes.length} planned routes | ${states.length} engine snapshots`);
   } catch (err) {
     setStatus(`❌ 실행 오류: ${err.message}`);
   } finally {
@@ -571,3 +579,11 @@ document.getElementById("btnRunSim").onclick = async e => {
 };
 
 render();
+
+if (location.protocol === "file:") {
+  if (window.SIM_RESULT) installResult(window.SIM_RESULT);
+  else setStatus("No saved engine result. Run a simulation using start_ui.bat or sim-ui.exe first.");
+  cfgNameSel.disabled = true;
+  document.getElementById("btnRefreshIni").disabled = true;
+  document.getElementById("btnOpenIni").disabled = true;
+}

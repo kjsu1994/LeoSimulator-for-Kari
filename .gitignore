@@ -24,3 +24,9 @@ dist/
 *.vci
 *.elog
 graph.jsonl
+
+# Reproducible simulation runs
+data/runs/
+data/latest.json
+
+data/latest_result.js

@@ -1,8 +1,15 @@
+import csv
+import hashlib
+import io
+import math
+import shlex
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 import http.server
 import json
 import os
 import re
-import shutil
 import string
 import subprocess
 import sys
@@ -14,7 +21,7 @@ import webbrowser
 
 BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 LOCAL_INI = os.path.join(BASE_DIR, "data", "omnetpp.ini")
-IMAGE_NAME = "florasat-sim:local"
+RUN_LOCK = threading.Lock()
 NO_WIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
@@ -69,10 +76,12 @@ def _parse_ini_tree(entry_path):
 
     def walk(path, cur_sec, is_root):
         norm = os.path.normpath(path)
-        if norm in visited or not os.path.isfile(norm):
+        if norm in visited:
             return cur_sec
+        if not os.path.isfile(norm):
+            raise ValueError(f"Missing INI include: {norm}")
         visited.add(norm)
-        for raw_line in open(norm, "r", encoding="utf-8"):
+        for raw_line in Path(norm).read_text(encoding="utf-8").splitlines():
             line = _strip_comment(raw_line)
             if not line:
                 continue
@@ -88,8 +97,6 @@ def _parse_ini_tree(entry_path):
             if m_inc:
                 rel = _unquote(m_inc.group(1))
                 cand = os.path.join(os.path.dirname(norm), rel)
-                if not os.path.isfile(cand):
-                    cand = os.path.join(BASE_DIR, "data", os.path.basename(rel))
                 cur_sec = walk(cand, cur_sec, False)
                 continue
             if "=" not in line:
@@ -179,10 +186,12 @@ def _parse_terminals(items, limit):
     return [t_map[i] for i in sorted(t_map)]
 
 
-def read_ini_config(config_name=None):
-    configs, sections, extends = _parse_ini_tree(INI_PATH)
+def read_ini_config(config_name=None, entry_path=None):
+    configs, sections, extends = _parse_ini_tree(entry_path or INI_PATH)
     names = [c["name"] for c in configs]
-    active = config_name if config_name in names else (names[0] if names else "Dijkstra132")
+    if config_name is not None and config_name not in names:
+        raise ValueError("Unknown scenario")
+    active = config_name or (names[0] if names else "Dijkstra132")
     chain = _resolve_chain(active, extends)
 
     flat = {}
@@ -243,84 +252,144 @@ def read_ini_config(config_name=None):
 
 
 def parse_routes_csv(csv_text):
+    reader = csv.DictReader(io.StringIO(csv_text))
+    required = "time route source station firstSat exitSat satHops uplinkMs satToStationMs totalMs path".split()
+    if reader.fieldnames != required:
+        raise ValueError("Unsupported routes.csv header")
     routes = []
-    for line in csv_text.strip().splitlines()[1:]:
-        if not line:
-            continue
-        r = line.split(",")
-        if len(r) < 11 or r[0] == "time" or not r[0][0].isdigit():
-            continue
-        entry = [
-            float(r[0]),
-            int(r[1]),
-            int(r[2].lstrip("GST")),
-            int(r[3]),
-            int(r[6]),
-            float(r[9]),
-            [int(x) for x in r[10].split("-") if x],
-        ]
-        if r[2].startswith("T"):
-            entry.append(1)
-        routes.append(entry)
+    previous = -1.0
+    for line, row in enumerate(reader, 2):
+        try:
+            if None in row or any(v is None for v in row.values()):
+                raise ValueError("Wrong column count")
+            if not re.fullmatch(r"(?:GS|T)\d+", row["source"]):
+                raise ValueError("Invalid source")
+            path = [int(x) for x in row["path"].split("-")]
+            t, ms = float(row["time"]), float(row["totalMs"])
+            first, last = int(row["firstSat"]), int(row["exitSat"])
+            hops = int(row["satHops"])
+            up, down = float(row["uplinkMs"]), float(row["satToStationMs"])
+            if not all(math.isfinite(x) and x >= 0 for x in (t, ms, up, down)) or t < previous:
+                raise ValueError("Invalid or unsorted numeric data")
+            if not path or min(path) < 0 or path[0] != first or path[-1] != last or hops != len(path) - 1:
+                raise ValueError("Inconsistent path")
+            entry = [t, int(row["route"]), int(re.sub(r"^[A-Z]+", "", row["source"])),
+                     int(row["station"]), hops, ms, path, int(row["source"].startswith("T")),
+                     first, last, up, down]
+            if min(entry[1:5]) < 0:
+                raise ValueError("Negative identifier")
+            routes.append(entry)
+            previous = t
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"Invalid CSV row {line}: {exc}") from exc
     return routes
 
 
-def ensure_docker_image():
-    chk = subprocess.run(
-        ["wsl", "--cd", "~", "-e", "docker", "image", "inspect", IMAGE_NAME],
-        capture_output=True, creationflags=NO_WIN
-    )
-    if chk.returncode == 0:
-        return
+def capture_inputs():
     if not LEO_DIR:
-        raise RuntimeError("Docker image missing and leo-main directory was not found.")
-    tmp_tar = os.path.join(tempfile.gettempdir(), "florasat_build.tar")
-    with tarfile.open(tmp_tar, "w", format=tarfile.GNU_FORMAT) as tar:
-        tar.add(os.path.join(BASE_DIR, "Dockerfile"), arcname="Dockerfile")
-        for item in ("src", "simulations"):
-            tar.add(os.path.join(LEO_DIR, item), arcname=item)
-    wsl_tar = "/mnt/" + tmp_tar[0].lower() + tmp_tar[2:].replace("\\", "/")
-    res = subprocess.run(
-        ["wsl", "--cd", "~", "-e", "bash", "-c", f"docker build -t {IMAGE_NAME} - < '{wsl_tar}'"],
-        capture_output=True, text=True, creationflags=NO_WIN
-    )
-    if res.returncode != 0:
-        raise RuntimeError(res.stderr or res.stdout)
+        raise RuntimeError("leo-main is required to run a simulation")
+    files = {"Dockerfile": Path(BASE_DIR, "Dockerfile").read_bytes()}
+    for folder in ("src", "simulations"):
+        base = Path(LEO_DIR, folder)
+        for path in sorted(base.rglob("*")):
+            if path.is_file() and path.suffix.lower() in {".cc", ".cpp", ".c", ".h", ".hpp", ".ned", ".msg", ".ini", ".xml", ".csv", ".txt", ".json", ".png", ".jpg"}:
+                if any(part in {"results", "results_sample", "out", "__pycache__"} for part in path.relative_to(base).parts):
+                    continue
+                files[path.relative_to(LEO_DIR).as_posix()] = path.read_bytes()
+    digest = hashlib.sha256()
+    for name, data in sorted(files.items()):
+        digest.update(name.encode() + b"\0" + hashlib.sha256(data).digest())
+    return files, digest.hexdigest()
+
+
+def ensure_docker_image(files, digest):
+    image = f"florasat-sim:{digest[:24]}"
+    chk = subprocess.run(["wsl", "--cd", "~", "-e", "docker", "image", "inspect", image],
+                         capture_output=True, creationflags=NO_WIN)
+    if chk.returncode:
+        with tempfile.TemporaryFile() as stream:
+            with tarfile.open(fileobj=stream, mode="w", format=tarfile.GNU_FORMAT) as archive:
+                for name, data in files.items():
+                    info = tarfile.TarInfo(name)
+                    info.size = len(data)
+                    archive.addfile(info, io.BytesIO(data))
+            stream.seek(0)
+            res = subprocess.run(["wsl", "--cd", "~", "-e", "docker", "build", "-t", image, "-"],
+                                 stdin=stream, capture_output=True, creationflags=NO_WIN, timeout=3600)
+        if res.returncode:
+            raise RuntimeError((res.stderr + res.stdout).decode("utf-8", errors="replace")[-12000:])
+    return image
+
+
+def export_offline_result(result):
+    target = Path(BASE_DIR, "data/latest_result.js")
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text("window.SIM_RESULT=" + json.dumps(result, ensure_ascii=True, allow_nan=False) + ";\n", encoding="utf-8")
+    os.replace(tmp, target)
 
 
 def run_simulation(config_name="Dijkstra132"):
-    ensure_docker_image()
-    ini_bytes = open(INI_PATH, "rb").read()
-    cmd = (
-        f"docker run --rm -i --entrypoint /bin/bash {IMAGE_NAME} -c "
-        f"'cat > omnetpp.ini && source /root/omnetpp/setenv >/dev/null 2>&1 && "
-        f"source /opt/inet4.5/setenv >/dev/null 2>&1 && "
-        f"opp_run -u Cmdenv -c {config_name} -n ../../src:..:/opt/inet4.5/src -l ../../src/flora omnetpp.ini >/dev/null 2>&1 && "
-        f"cat results/routes.csv'"
-    )
-    proc = subprocess.run(
-        ["wsl", "--cd", "~", "-e", "bash", "-c", cmd],
-        input=ini_bytes, capture_output=True, timeout=600, creationflags=NO_WIN
-    )
-    csv_text = proc.stdout.decode("utf-8", errors="replace")
-    if proc.returncode != 0 or "time,route" not in csv_text:
-        err = proc.stderr.decode("utf-8", errors="replace")
-        raise RuntimeError(err or csv_text or "Simulator failed")
-
-    idx = csv_text.index("time,route")
-    clean_csv = csv_text[idx:]
-    open(os.path.join(BASE_DIR, "data", "routes.csv"), "w", encoding="utf-8", newline="\n").write(clean_csv)
-
-    if LEO_DIR:
-        leo_res_dir = os.path.join(LEO_DIR, "simulations", "Dijkstra132", "results")
-        os.makedirs(leo_res_dir, exist_ok=True)
-        open(os.path.join(leo_res_dir, "routes.csv"), "w", encoding="utf-8", newline="\n").write(clean_csv)
-
-    routes = parse_routes_csv(clean_csv)
-    open(os.path.join(BASE_DIR, "data", "routes_data.js"), "w", encoding="utf-8").write(
-        "window.ROUTES=" + json.dumps(routes, separators=(",", ":")) + ";"
-    )
-    return routes
+    if not RUN_LOCK.acquire(blocking=False):
+        raise RuntimeError("Another simulation is running")
+    try:
+        files, digest = capture_inputs()
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex[:8]
+        run_dir = Path(BASE_DIR, "data", "runs", run_id)
+        run_dir.mkdir(parents=True)
+        # Keep the exact input tree alongside results; do not overwrite the supplied project.
+        for name, data in files.items():
+            target = run_dir / "inputs" / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        cfg = read_ini_config(config_name, str(run_dir / "inputs/simulations/Dijkstra132/omnetpp.ini"))
+        image = ensure_docker_image(files, digest)
+        script = (
+            "source /root/omnetpp/setenv >/dev/null 2>&1 && "
+            "source /opt/inet4.5/setenv >/dev/null 2>&1 && "
+            "mkdir -p results && "
+            "opp_run -u Cmdenv -c " + shlex.quote(config_name) +
+            " -n ../../src:..:/opt/inet4.5/src -l ../../src/flora -l /opt/inet4.5/src/INET omnetpp.ini "
+            "'--*.mapDataSource.routeLogFile=\"results/routes.csv\"' "
+            "'--*.mapDataSource.stateLogFile=\"results/states.jsonl\"' "
+            "'--*.mapDataSource.stateLogInterval=1s' >results/run.log 2>&1; "
+            "status=$?; tar -cf - results; exit $status"
+        )
+        container = "florasat-ui-" + run_id.lower()
+        try:
+            proc = subprocess.run(["wsl", "--cd", "~", "-e", "docker", "run", "--rm", "--name", container,
+                                   "--entrypoint", "/bin/bash", image, "-c", script],
+                                  capture_output=True, timeout=600, creationflags=NO_WIN)
+        except subprocess.TimeoutExpired:
+            subprocess.run(["wsl", "-e", "docker", "rm", "-f", container], capture_output=True, creationflags=NO_WIN)
+            raise RuntimeError("Simulation timed out after 600 seconds")
+        if proc.stdout:
+            with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as archive:
+                for member in archive:
+                    if member.isfile() and member.name.startswith("results/") and ".." not in Path(member.name).parts:
+                        target = run_dir / member.name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(archive.extractfile(member).read())
+        if proc.returncode:
+            log = run_dir / "results/run.log"
+            raise RuntimeError((log.read_text(errors="replace") if log.exists() else proc.stderr.decode(errors="replace"))[-12000:])
+        raw = (run_dir / "results/routes.csv").read_bytes()
+        routes = parse_routes_csv(raw.decode("utf-8"))
+        states = [json.loads(line) for line in (run_dir / "results/states.jsonl").read_text().splitlines() if line]
+        if not states:
+            raise RuntimeError("Engine state output is empty")
+        result = {"ok": True, "routes": routes, "states": states, "config": cfg,
+                  "runId": run_id, "inputHash": digest, "image": image,
+                  "csvHash": hashlib.sha256(raw).hexdigest(), "createdAt": datetime.now(timezone.utc).isoformat(),
+                  "overrides": {"routeLogFile": "results/routes.csv", "stateLogFile": "results/states.jsonl", "stateLogInterval": "1s"}}
+        (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+        export_offline_result(result)
+        pointer = Path(BASE_DIR, "data", "latest.json")
+        tmp = pointer.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"runId": run_id}), encoding="utf-8")
+        os.replace(tmp, pointer)
+        return result
+    finally:
+        RUN_LOCK.release()
 
 
 class SimHandler(http.server.SimpleHTTPRequestHandler):
@@ -343,12 +412,32 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
         if parsed.path == "/api/config":
             qs = urllib.parse.parse_qs(parsed.query)
             cfg_name = qs.get("config", [None])[0]
-            return self.send_json(read_ini_config(cfg_name))
+            try:
+                return self.send_json(read_ini_config(cfg_name))
+            except (ValueError, OSError) as exc:
+                return self.send_json({"error": str(exc)}, 400)
+        if parsed.path == "/api/result":
+            pointer = Path(BASE_DIR, "data/latest.json")
+            if not pointer.exists():
+                return self.send_json(None)
+            run_id = json.loads(pointer.read_text())["runId"]
+            if not re.fullmatch(r"[A-Za-z0-9-]+", run_id):
+                return self.send_json({"error": "Invalid result pointer"}, 500)
+            return self.send_json(json.loads(Path(BASE_DIR, "data/runs", run_id, "result.json").read_text(encoding="utf-8")))
         return super().do_GET()
 
     def do_POST(self):
-        length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length).decode("utf-8")) if length > 0 else {}
+        if self.headers.get("Origin") not in (None, f"http://127.0.0.1:{self.server.server_port}", f"http://localhost:{self.server.server_port}"):
+            return self.send_json({"error": "Origin rejected"}, 403)
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            if not 0 <= length <= 4096:
+                raise ValueError("Request too large")
+            body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
+            if not isinstance(body, dict):
+                raise ValueError("Expected JSON object")
+        except (ValueError, UnicodeError) as exc:
+            return self.send_json({"error": str(exc)}, 400)
 
         if self.path == "/api/open-ini":
             os.startfile(INI_PATH)
@@ -357,8 +446,7 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
         if self.path == "/api/run":
             try:
                 cfg_name = body.get("configName") or read_ini_config().get("activeConfig", "Dijkstra132")
-                routes = run_simulation(cfg_name)
-                return self.send_json({"ok": True, "routes": routes, "config": read_ini_config(cfg_name)})
+                return self.send_json(run_simulation(cfg_name))
             except Exception as e:
                 return self.send_json({"ok": False, "error": str(e)}, status=500)
 
