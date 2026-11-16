@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 // Interactive 2D Map, Route Replay & Simulator Runner Controller
 const canvas = document.getElementById("mapCanvas");
 const ctx = canvas.getContext("2d");
@@ -33,7 +35,7 @@ function installResult(result) {
   const download = document.getElementById("resultFiles");
   download.hidden = false;
   download.href = `data/runs/${result.runId}/${result.replay ? "routes.csv" : "results/routes.csv"}`;
-  download.textContent = `Original CSV | run ${result.runId} | SHA-256 ${result.csvHash.slice(0, 16)}`;
+  download.textContent = `CSV | run ${result.runId} | SHA-256 ${result.csvHash.slice(0, 16)}`;
   render();
 }
 let simTime = routes.length ? Math.min(1210.0, routes[routes.length - 1][0]) : 0.0;
@@ -450,7 +452,6 @@ function renderIniTable() {
     const ov = e.sec !== "General" ? " class=\"ini-override\"" : "";
     return `<tr${ov}><td class="ini-k" title="${escHtml(e.k)}">${escHtml(e.k)}</td><td class="ini-v" title="${escHtml(e.v)}">${escHtml(e.v)}</td><td class="ini-s">[${escHtml(e.sec)}]</td></tr>`;
   }).join("");
-  document.getElementById("iniTable").title = "INI preview only; OMNeT++ resolves wildcard precedence and expressions. Engine snapshots are authoritative.";
   document.getElementById("iniCount").textContent = `표시 ${rows.length} / 전체 ${currentEffectiveEntries.length}개 INI 키 (파란 강조 = 상속/시나리오 설정)`;
 }
 
@@ -587,7 +588,7 @@ document.getElementById("btnRunSim").onclick = async e => {
     return setStatus("⚠️ 시뮬레이션 실행은 sim-ui.exe에서 동작합니다.");
   }
   btn.disabled = true;
-  setStatus(`Running [${cfgName}] from captured inputs (original model unchanged)...`);
+  setStatus(`Running [${cfgName}] using local engine...`);
   try {
     const t0 = performance.now();
     const res = await fetch("/api/run", { method: "POST", body: JSON.stringify({ configName: cfgName }) }).then(r => r.json());

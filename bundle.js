@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 // A deliberately bounded INI reader for the versioned Dijkstra replay model.
 // Unsupported runtime expressions fail instead of silently using another run's settings.
 const REPLAY_MODEL = {"profile": "leo-dijkstra-delta-v1", "modelHash": "fe5550651103f796a211ab098754049544714ecf96bb69ace6d1823675b0f179"};
@@ -11,6 +13,7 @@ function bundlePath(base, relative) {
   return parts.join("/");
 }
 function readReplayIni(files, entry, selected) {
+  const rootNames = new Set();
   const sections = new Map([["General",[]]]), parents = new Map(), active = new Set();
   const unquote = x => x.startsWith('"') && x.endsWith('"') ? JSON.parse(x) : x;
   function walk(name, section) {
@@ -22,7 +25,7 @@ function readReplayIni(files, entry, selected) {
       for(const ch of raw){if(ch==="#"&&!quoted)break;line+=ch;if(ch==='"'&&!escaped)quoted=!quoted;escaped=ch==="\\"&&!escaped;}
       line=line.trim();if(!line)continue;
       let m=line.match(/^\[(?:Config\s+)?([^\]]+)\]$/);
-      if(m){section=m[1].trim();if(!sections.has(section))sections.set(section,[]);continue;}
+      if(m){section=m[1].trim();if(name===entry && section!=="General")rootNames.add(section);if(!sections.has(section))sections.set(section,[]);continue;}
       m=line.match(/^include\s+(.+)$/);
       if(m){section=walk(bundlePath(name,unquote(m[1].trim())),section);continue;}
       const eq=line.indexOf("=");if(eq<0)throw new Error(`Unsupported INI syntax in ${name}`);
@@ -80,7 +83,7 @@ function readReplayIni(files, entry, selected) {
   const c="LeoDijkstra.constellationCreator.",tc="LeoDijkstra.topologyControl.";
   if(get("network","")!=="Florasat.Dijkstra132.LeoDijkstra" || !bool(c+"enabled",false) || get(tc+"walkerType","DELTA")!=="DELTA")throw new Error("Unsupported replay network/constellation");
   const cfg={activeConfig:selected,description:get("description",""),chain,extends:parents.get(selected)||[],
-    configs:[...sections.keys()].filter(k=>["Dijkstra132","Dijkstra132Hop","Dijkstra132Pair","Dijkstra132StationsOnly"].includes(k)).map(name=>({name})),ownEntries:sections.get(selected),effectiveEntries:entries,
+    configs:[...rootNames].filter(k=>k!=="Dijkstra132Terminals").map(name=>({name})),ownEntries:sections.get(selected),effectiveEntries:entries,
     iniPath:entry,leoFound:false,numSatellites:number("LeoDijkstra.numSatellites"),planes:number(c+"planeCount"),
     phasing:number(c+"interPlaneSpacing"),altitude:number(c+"altitude"),inclination:number(c+"inclination"),
     raanSpread:number(c+"raanSpread",360),baseYear:number(c+"baseYear",20),baseDay:number(c+"baseDay",.8292315),
@@ -116,7 +119,6 @@ function readReplayIni(files, entry, selected) {
 async function prepareBundle(bundle) {
   const m=bundle.manifest;
   if(!m||m.format!=="florasat-csv-ini-v1"||m.profile!==REPLAY_MODEL.profile||m.modelHash!==REPLAY_MODEL.modelHash)throw new Error("지원하지 않는 실행 결과 또는 원본 모델 버전입니다.");
-  if(!["Dijkstra132","Dijkstra132Hop","Dijkstra132Pair","Dijkstra132StationsOnly"].includes(m.configName))throw new Error("Unsupported replay configuration");
   if(!/^[a-zA-Z0-9-]{8,80}$/.test(m.runId)||!m.files||!m.configName||Object.keys(m.overrides||{}).length)throw new Error("Invalid result metadata/overrides");
   const files=new Map(Object.entries(bundle.files||{}));
   for(const [name,expected] of Object.entries(m.files)){

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 const assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const { spawn } = require("node:child_process");
@@ -39,7 +41,7 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     assert.equal(await evaluate("routes.length"),2671);
     assert(await evaluate("document.querySelector('#routeTable tbody').children.length > 0"));
     await evaluate("cfgNameSel.value='Dijkstra132Hop';cfgNameSel.onchange()");
-    assert.equal(await evaluate("document.getElementById('scenarioRouting').textContent"),"지연 최소");
+    assert.equal(await evaluate("document.getElementById('scenarioRouting').textContent"),"홉 수 최소");
     assert.equal(await evaluate("routes.length"),2671);
     assert.equal(await evaluate("resultMeta.replay"),true);
     assert(await evaluate("Number(document.getElementById('kpiGsl').textContent) > 0"));

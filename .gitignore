@@ -30,3 +30,10 @@ data/runs/
 data/latest.json
 
 data/latest_result.js
+
+# Native build products
+*.obj
+*.o
+
+# Keep the relocatable build recipe
+!sim-ui.spec

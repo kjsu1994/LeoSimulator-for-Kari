@@ -1,8 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 import csv
-import hashlib
 import io
 import math
-import shlex
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,33 +10,20 @@ import http.server
 import json
 import os
 import re
-import string
 import subprocess
 import sys
-import tarfile
-import tempfile
 import threading
 import urllib.parse
 import webbrowser
-from result_bundle import content_hash, make_bundle, write_bundle
+from result_bundle import make_bundle, write_bundle
 
 BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
-LOCAL_INI = os.path.join(BASE_DIR, "data", "omnetpp.ini")
 RUN_LOCK = threading.Lock()
 NO_WIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def find_leo_main():
-    candidates = [os.path.abspath(os.path.join(BASE_DIR, "..", "leo-main"))]
-    candidates += [f"{d}:\\leo-main" for d in string.ascii_uppercase]
-    for path in candidates:
-        if os.path.isfile(os.path.join(path, "simulations", "Dijkstra132", "omnetpp.ini")):
-            return path
-    return None
-
-
-LEO_DIR = find_leo_main()
-INI_PATH = os.path.join(LEO_DIR, "simulations", "Dijkstra132", "omnetpp.ini") if LEO_DIR else LOCAL_INI
+LEO_DIR = os.path.join(BASE_DIR, "settings")
+INI_PATH = os.path.join(LEO_DIR, "simulations", "Dijkstra132", "omnetpp.ini")
 
 
 def _strip_comment(raw):
@@ -118,16 +105,22 @@ def _parse_ini_tree(entry_path):
 
 
 def _resolve_chain(cfg_name, extends):
-    seen, chain = set(), ["General"]
-    def visit(name):
-        if name in seen or name == "General":
-            return
-        seen.add(name)
-        for p in extends.get(name, []):
-            visit(p)
-        chain.append(name)
-    visit(cfg_name)
-    return chain
+    def order(name, visiting):
+        if name in visiting:
+            raise ValueError("Cyclic INI inheritance")
+        parents = extends.get(name, [])
+        sequences = [order(p, visiting | {name}) for p in parents] + [parents[:]]
+        result = [name]
+        while any(sequences):
+            head = next((s[0] for s in sequences if s and not any(s[0] in other[1:] for other in sequences)), None)
+            if head is None:
+                raise ValueError("Inconsistent INI inheritance")
+            result.append(head)
+            for sequence in sequences:
+                if sequence and sequence[0] == head:
+                    sequence.pop(0)
+        return result
+    return ["General"] + list(reversed([name for name in order(cfg_name, set()) if name != "General"]))
 
 
 def _parse_stations(items):
@@ -199,7 +192,7 @@ def read_ini_config(config_name=None, entry_path=None):
     items = []
     resolved = {}
     for sec in chain:
-        for k, v in sections.get(sec, []):
+        for k, v in reversed(sections.get(sec, [])):
             flat[k] = _unquote(v)
             items.append((k, v))
             if k in resolved:
@@ -229,7 +222,7 @@ def read_ini_config(config_name=None, entry_path=None):
         "description": desc,
         "extends": extends.get(active, []),
         "chain": chain,
-        "configs": [{**c, "extends": extends.get(c["name"], [])} for c in configs if c["name"] in {"Dijkstra132", "Dijkstra132Hop", "Dijkstra132Pair", "Dijkstra132StationsOnly"}],
+        "configs": [{**c, "extends": extends.get(c["name"], [])} for c in configs if c["name"] != "Dijkstra132Terminals"],
         "ownEntries": [{"k": k, "v": v} for k, v in sections.get(active, [])],
         "effectiveEntries": list(resolved.values()),
         "simTimeLimit": get_num(["sim-time-limit"], 600.0, _time_sec),
@@ -286,42 +279,6 @@ def parse_routes_csv(csv_text):
     return routes
 
 
-def capture_inputs():
-    if not LEO_DIR:
-        raise RuntimeError("leo-main is required to run a simulation")
-    files = {"Dockerfile": Path(BASE_DIR, "Dockerfile").read_bytes()}
-    for folder in ("src", "simulations"):
-        base = Path(LEO_DIR, folder)
-        for path in sorted(base.rglob("*")):
-            if path.is_file() and path.suffix.lower() in {".cc", ".cpp", ".c", ".h", ".hpp", ".ned", ".msg", ".ini", ".xml", ".csv", ".txt", ".json", ".png", ".jpg"}:
-                if any(part in {"results", "results_sample", "out", "__pycache__"} for part in path.relative_to(base).parts):
-                    continue
-                files[path.relative_to(LEO_DIR).as_posix()] = path.read_bytes()
-    digest = hashlib.sha256()
-    for name, data in sorted(files.items()):
-        digest.update(name.encode() + b"\0" + hashlib.sha256(data).digest())
-    return files, digest.hexdigest()
-
-
-def ensure_docker_image(files, digest):
-    image = f"florasat-sim:{digest[:24]}"
-    chk = subprocess.run(["wsl", "--cd", "~", "-e", "docker", "image", "inspect", image],
-                         capture_output=True, creationflags=NO_WIN)
-    if chk.returncode:
-        with tempfile.TemporaryFile() as stream:
-            with tarfile.open(fileobj=stream, mode="w", format=tarfile.GNU_FORMAT) as archive:
-                for name, data in files.items():
-                    info = tarfile.TarInfo(name)
-                    info.size = len(data)
-                    archive.addfile(info, io.BytesIO(data))
-            stream.seek(0)
-            res = subprocess.run(["wsl", "--cd", "~", "-e", "docker", "build", "-t", image, "-"],
-                                 stdin=stream, capture_output=True, creationflags=NO_WIN, timeout=3600)
-        if res.returncode:
-            raise RuntimeError((res.stderr + res.stdout).decode("utf-8", errors="replace")[-12000:])
-    return image
-
-
 def export_offline_result(result):
     target = Path(BASE_DIR, "data/latest_result.js")
     tmp = target.with_suffix(".tmp")
@@ -330,59 +287,31 @@ def export_offline_result(result):
 
 
 def run_simulation(config_name="Dijkstra132"):
-    if config_name not in {"Dijkstra132", "Dijkstra132Hop", "Dijkstra132Pair", "Dijkstra132StationsOnly"}:
-        raise ValueError("This replay version supports the Dijkstra ground-node scenarios only")
     if not RUN_LOCK.acquire(blocking=False):
         raise RuntimeError("Another simulation is running")
     try:
-        files, digest = capture_inputs()
+        from native_engine import configuration
+        files = {p.relative_to(LEO_DIR).as_posix(): p.read_bytes() for p in Path(LEO_DIR).rglob("*.ini")}
+        cfg = configuration(read_ini_config(config_name))
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex
         run_dir = Path(BASE_DIR, "data", "runs", run_id)
         run_dir.mkdir(parents=True)
-        # Validate the selected config against the exact captured tree, never a changing source folder.
-        with tempfile.TemporaryDirectory() as tmp_inputs:
-            from result_bundle import ini_dependencies
-            for name, data in ini_dependencies(files).items():
-                target = Path(tmp_inputs, name)
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(data)
-            read_ini_config(config_name, str(Path(tmp_inputs, "simulations/Dijkstra132/omnetpp.ini")))
-        source_files = {name: data for name, data in files.items() if name.startswith("src/") and Path(name).suffix in {".cc", ".cpp", ".c", ".h", ".hpp", ".ned", ".msg"}}
-        profile = json.loads(Path(BASE_DIR, "replay-model.json").read_text(encoding="utf-8"))
-        if content_hash(source_files) != profile["modelHash"]:
-            raise ValueError("원본 모델 버전이 현재 지도 재현 버전과 다릅니다. 원본은 수정하지 않았습니다.")
-        image = ensure_docker_image(files, digest)
-        opp_args = ["opp_run", "-u", "Cmdenv", "-c", config_name, "-r", "0", "-n", "../../src:..:/opt/inet4.5/src",
-                    "-l", "../../src/flora", "-l", "/opt/inet4.5/src/INET", "omnetpp.ini",
-                    '--*.mapDataSource.routeLogFile="results/routes.csv"']
-        script = ("source /root/omnetpp/setenv >/dev/null 2>&1 && "
-                  "source /opt/inet4.5/setenv >/dev/null 2>&1 && mkdir -p results && " + shlex.join(opp_args) +
-                  " >results/run.log 2>&1; status=$?; tar -cf - results; exit $status")
-        container = "florasat-ui-" + run_id.lower()
-        try:
-            proc = subprocess.run(["wsl", "--cd", "~", "-e", "docker", "run", "--rm", "--name", container,
-                                   "--entrypoint", "/bin/bash", image, "-c", script],
-                                  capture_output=True, timeout=600, creationflags=NO_WIN)
-        except subprocess.TimeoutExpired:
-            subprocess.run(["wsl", "-e", "docker", "rm", "-f", container], capture_output=True, creationflags=NO_WIN)
-            raise RuntimeError("Simulation timed out after 600 seconds")
-        if proc.stdout:
-            with tarfile.open(fileobj=io.BytesIO(proc.stdout)) as archive:
-                for member in archive:
-                    if member.isfile() and member.name.startswith("results/") and ".." not in Path(member.name).parts:
-                        target = run_dir / member.name
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        target.write_bytes(archive.extractfile(member).read())
+        input_path = run_dir / "engine-input.json"
+        input_path.write_text(json.dumps(cfg, ensure_ascii=False, allow_nan=False), encoding="utf-8")
+        executable = Path(BASE_DIR, "engine", "engine.exe")
+        if not executable.is_file():
+            raise ValueError("Local engine is missing")
+        proc = subprocess.run([str(executable), str(input_path), str(run_dir)], capture_output=True, timeout=600, creationflags=NO_WIN)
+        (run_dir / "run.log").write_bytes(proc.stdout + proc.stderr)
         if proc.returncode:
-            log = run_dir / "results/run.log"
-            raise RuntimeError((log.read_text(errors="replace") if log.exists() else proc.stderr.decode(errors="replace"))[-12000:])
-        raw = (run_dir / "results/routes.csv").read_bytes()
+            raise RuntimeError(proc.stderr.decode("utf-8", errors="replace"))
+        raw = (run_dir / "routes.csv").read_bytes()
         parse_routes_csv(raw.decode("utf-8-sig"))
-        bundle, payload = make_bundle(files, raw, config_name, content_hash(source_files), run_id=run_id,
-                                      command=opp_args)
-        bundle["manifest"]["image"] = image
-        bundle["manifest"]["imageInputHash"] = digest
-        bundle["manifest"]["outputOverrides"] = {"routeLogFile": "results/routes.csv"}
+        profile = json.loads(Path(BASE_DIR, "replay-model.json").read_text(encoding="utf-8"))
+        bundle, payload = make_bundle(files, raw, config_name, profile["modelHash"], run_id=run_id,
+                                     command=["engine.exe", "engine-input.json", "."])
+        bundle["manifest"]["engine"] = {"id": "leo-native", "version": "1.0.0"}
+        bundle["manifest"]["provenance"] = "native-simulation"
         write_bundle(run_dir, bundle, payload)
         result = {"ok": True, "bundle": bundle, "runId": run_id}
         (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, allow_nan=False), encoding="utf-8")
@@ -446,7 +375,7 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
         if self.path == "/api/open-ini":
             try:
                 if not LEO_DIR or not os.path.isfile(INI_PATH):
-                    raise ValueError("원본 프로젝트의 omnetpp.ini를 찾을 수 없습니다.")
+                    raise ValueError("로컬 INI 설정을 찾을 수 없습니다.")
                 subprocess.Popen(["notepad.exe", INI_PATH], creationflags=NO_WIN)
                 return self.send_json({"ok": True, "path": INI_PATH})
             except (ValueError, OSError) as exc:
@@ -470,7 +399,7 @@ if __name__ == "__main__":
 
     try:
         import webview
-        webview.create_window("FLoRaSat LEO Simulator", url, width=1520, height=900)
+        webview.create_window("LEO Network Simulator", url, width=1520, height=900)
         webview.start()
     except ImportError:
         webbrowser.open(url)

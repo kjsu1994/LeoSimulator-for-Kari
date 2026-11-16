@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
 const {readReplayIni,prepareBundle,bundlePath}=require("./bundle.js");
 const {parseRoutesCsv}=require("./csv.js");

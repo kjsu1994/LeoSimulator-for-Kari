@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { parseRoutesCsv } = require("./csv.js");

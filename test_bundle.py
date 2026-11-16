@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 import hashlib
 import json
 import tempfile

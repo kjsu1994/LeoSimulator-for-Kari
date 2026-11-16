@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 // Dynamic LEO Constellation (Walker-Delta) & SGP4A / Station / Terminal Geometry
 const PI = 3.1415926535, TWOPI = 2 * PI, DEG = PI / 180, RAD = 180 / PI;
 const XKMPER = 6378.135, F = 1 / 298.26, GE = 398600.8, J2 = 1.0826158e-3, J3 = -2.53881e-6, J4 = -1.65597e-6;

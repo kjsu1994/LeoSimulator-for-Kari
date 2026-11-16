@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 import csv
 import io
 import json
@@ -33,7 +35,7 @@ class DataTests(unittest.TestCase):
     def test_unknown_config_cannot_reach_shell(self):
         with self.assertRaises(ValueError):
             server.read_ini_config("Dijkstra132; touch injected")
-        self.assertEqual(server.read_ini_config("Dijkstra132Hop")["metric"], "delay")
+        self.assertEqual(server.read_ini_config("Dijkstra132Hop")["metric"], "hop")
 
     def test_ini_editor_opens_live_settings_without_modifying_files(self):
         import http.server
@@ -74,24 +76,78 @@ class DataTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 server._parse_ini_tree(str(path))
 
-    def test_inputs_ignore_results_but_track_engine_and_includes(self):
+    def test_local_engine_is_reproducible_without_original(self):
+        import subprocess
+        from native_engine import configuration
+        cfg=configuration(server.read_ini_config("Dijkstra132"))
+        cfg["simTimeLimit"]=10
+        outputs=[]
         with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            for folder in ("src", "simulations/Dijkstra132/results"):
-                (base/folder).mkdir(parents=True)
-            (base/"src/test.cc").write_text("engine")
-            ini = base/"simulations/Dijkstra132/omnetpp.ini"
-            ini.write_text("[General]")
-            with patch.object(server, "LEO_DIR", tmp):
-                a, first = server.capture_inputs()
-                (base/"simulations/Dijkstra132/results/routes.csv").write_text("old result")
-                self.assertEqual(server.capture_inputs()[1], first)
-                ini.write_text("[General]\n# changed")
-                self.assertNotEqual(server.capture_inputs()[1], first)
-                ini.write_text("[General]")
-                (base/"src/test.cc").write_text("changed engine")
-                self.assertNotEqual(server.capture_inputs()[1], first)
-                self.assertNotIn("simulations/Dijkstra132/results/routes.csv", a)
+            for i in range(2):
+                folder=Path(tmp,str(i));folder.mkdir()
+                file=folder/"input.json";file.write_text(json.dumps(cfg))
+                subprocess.run([str(Path(server.BASE_DIR,"engine/engine.exe")),str(file),str(folder)],check=True)
+                outputs.append((folder/"routes.csv").read_bytes())
+                summary=json.loads((folder/"summary.json").read_text())
+                self.assertEqual(summary["sent"],summary["received"]+summary["dropped"]+summary["inFlight"])
+                server.parse_routes_csv(outputs[-1].decode())
+        self.assertEqual(outputs[0],outputs[1])
+
+    def test_native_queue_and_hop_limit(self):
+        import subprocess
+        from native_engine import configuration
+        base=configuration(server.read_ini_config("Dijkstra132"))
+        base["simTimeLimit"]=2
+        base["minimumElevation"]=-90
+        base["maxGroundLinks"]=500
+        base["groundlinkDatarate"]=1000000
+        base["islDatarate"]=1000000
+        for st in base["stations"]:
+            st["enabled"]=False
+        base["stations"][0].update(enabled=True,dstStation=10,startTime=0,sendInterval=.001)
+        with tempfile.TemporaryDirectory() as tmp:
+            for hops in (64,0):
+                cfg=json.loads(json.dumps(base));cfg["maxHops"]=hops
+                folder=Path(tmp,str(hops));folder.mkdir()
+                file=folder/"input.json";file.write_text(json.dumps(cfg))
+                subprocess.run([str(Path(server.BASE_DIR,"engine/engine.exe")),str(file),str(folder)],check=True)
+                summary=json.loads((folder/"summary.json").read_text())
+                self.assertEqual(summary["sent"],summary["received"]+summary["dropped"]+summary["inFlight"])
+                self.assertGreater(summary["sent"],100)
+                if hops==0:
+                    self.assertEqual(summary["received"],0)
+                    self.assertGreater(summary["dropped"],0)
+                else:
+                    self.assertGreater(summary["received"],0)
+                    self.assertGreater(summary["inFlight"],0)
+                    deliveries=list(csv.DictReader((folder/"events.csv").read_text().splitlines()))
+                    self.assertTrue(any(r["event"]=="receive" and float(r["detail"])>.1 for r in deliveries))
+
+    def test_native_runs_from_isolated_product_folder(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            shutil.copytree(Path(server.BASE_DIR,"settings"),root/"settings")
+            (root/"engine").mkdir()
+            shutil.copy2(Path(server.BASE_DIR,"engine/engine.exe"),root/"engine/engine.exe")
+            shutil.copy2(Path(server.BASE_DIR,"replay-model.json"),root/"replay-model.json")
+            with patch.object(server,"BASE_DIR",tmp),patch.object(server,"LEO_DIR",str(root/"settings")),patch.object(server,"INI_PATH",str(root/"settings/simulations/Dijkstra132/omnetpp.ini")):
+                result=server.run_simulation("Dijkstra132")
+            self.assertEqual(result["bundle"]["manifest"]["engine"]["id"],"leo-native")
+            self.assertTrue((root/"data/runs"/result["runId"]/"routes.csv").is_file())
+            self.assertFalse((root/"leo-main").exists())
+
+    def test_hop_preset_selects_hop_algorithm(self):
+        from native_engine import configuration
+        cfg=configuration(server.read_ini_config("Dijkstra132Hop"))
+        self.assertEqual(cfg["metric"],"hop")
+        self.assertEqual(cfg["algorithm"],"dijkstra-hop")
+
+    def test_native_rejects_invalid_settings(self):
+        from native_engine import configuration
+        cfg=server.read_ini_config("Dijkstra132")
+        cfg["planes"]=0
+        with self.assertRaises(ValueError): configuration(cfg)
 
 if __name__ == "__main__":
     unittest.main()

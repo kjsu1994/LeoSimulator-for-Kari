@@ -5,8 +5,9 @@ commit a4eb353. Corrections follow the supplied leo-main's cOrbitA,
 cNoradBaseA, cNoradSGP4A, cEci and ConstellationTopologyControl equations.
 The libnorad source attributes Michael F. Henry (2002-2003), Aiden Valentine,
 and the underlying Space Track Report No. 3 equations. The supplied leo-main
-LICENSE.md is LGPLv3; this replay must not be presented as an independently
-licensed replacement engine. Keep applicable copyright/license notices in
+LICENSE.md is LGPLv3; the leosatellites upstream includes GPLv3 material.
+The combined delivered program uses GPLv3; retain the original file terms.
+This replay must not be presented as an independently licensed replacement engine. Keep applicable copyright/license notices in
 redistribution and review source distribution obligations for delivery.
 
 The model is bound to replay-model.json's source fingerprint. Unknown source

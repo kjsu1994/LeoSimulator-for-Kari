@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 // The engine emits unquoted numeric fields and GS/T identifiers.
 function parseRoutesCsv(text) {
   const lines = text.replace(/^\uFEFF/, "").trim().split(/\r?\n/);
