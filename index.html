@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>LEO Satellite Routing Simulator UI (Dijkstra132)</title>
-  <link rel="stylesheet" href="style.css?v=20261116-map-state-2">
+  <link rel="stylesheet" href="style.css?v=20261116-csv-state-3">
 </head>
 <body>
   <header class="topbar">
@@ -25,7 +25,7 @@
         <option value="30">30x</option>
         <option value="60">60x</option>
       </select>
-      <label class="file-btn">📂 Load CSV<input id="csvInput" type="file" accept=".csv" hidden></label>
+      <label class="file-btn">📂<input id="csvInput" type="file" accept=".csv" hidden></label>
     </div>
   </header>
 
@@ -127,6 +127,7 @@
           <span>Recent Planned Routes</span>
           <small id="activeCount">0 active</small>
         </div>
+        <p id="csvSource" class="csv-source"></p>
         <div class="table-scroll">
           <table id="routeTable">
             <thead>
@@ -139,9 +140,9 @@
     </aside>
   </main>
 
-  <script src="data/latest_result.js?v=20261116-map-state-2"></script>
-  <script src="csv.js?v=20261116-map-state-2"></script>
-  <script src="orbit.js?v=20261116-map-state-2"></script>
-  <script src="app.js?v=20261116-map-state-2"></script>
+  <script src="data/latest_result.js?v=20261116-csv-state-3"></script>
+  <script src="csv.js?v=20261116-csv-state-3"></script>
+  <script src="orbit.js?v=20261116-csv-state-3"></script>
+  <script src="app.js?v=20261116-csv-state-3"></script>
 </body>
 </html>

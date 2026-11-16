@@ -25,8 +25,11 @@ Simulation execution requires WSL with Docker. The server listens on localhost:8
   from Station traffic modules, including ship/aircraft traffic. They are sampled
   cumulative counters, not inferred from CSV. They do not represent IoT statistics.
 - Coverage circles are geometric illustrations, not an RF success prediction.
-- External/legacy CSV has no trustworthy matching settings or coordinates: only
-  its planned route table is displayed, without invented positions or links.
+- CSV import keeps the existing engine map. If all parsed rows match the saved run,
+  map and CSV replay together. Otherwise the selected CSV table/statistics replay
+  independently while the existing map and its paths remain frozen and labelled
+  as a reference. Foreign CSV paths are never attached to unrelated coordinates.
+- Invalid/unreadable CSV leaves the current map and route data intact.
 - The INI table is a preview. OMNeT++ itself resolves wildcard priority, expressions
   and full configuration semantics; the table is not a second simulation engine.
 

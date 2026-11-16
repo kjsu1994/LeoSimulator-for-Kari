@@ -9,14 +9,15 @@ earthImg.src = "data/earth.png";
 earthImg.onload = () => render();
 
 let routes = []; // Legacy files have no matching configuration/state evidence.
-let states = [], resultMeta = null, loadedConfigKey = "";
+let states = [], resultMeta = null, loadedConfigKey = "", csvMapTime = null;
 function stateAt(t) {
   let lo = 0, hi = states.length;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (states[mid].t <= t) lo = mid + 1; else hi = mid; }
   return lo ? states[lo - 1] : null;
 }
 function clearResult() {
-  routes = []; states = []; resultMeta = null; selectedRouteId = null; simTime = 0;
+  routes = []; states = []; resultMeta = null; selectedRouteId = null; simTime = 0; csvMapTime = null;
+  document.getElementById("csvSource").textContent = "";
   playing = false; document.getElementById("btnPlay").textContent = "Play";
   document.getElementById("resultFiles").hidden = true;
 }
@@ -128,14 +129,26 @@ function drawFootprint(latDeg, lonDeg, altKm) {
   ctx.restore();
 }
 
-function upperBoundTime(t) {
-  let lo = 0, hi = routes.length;
+function upperBoundTime(t, data = routes) {
+  let lo = 0, hi = data.length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (routes[mid][0] <= t) lo = mid + 1;
+    if (data[mid][0] <= t) lo = mid + 1;
     else hi = mid;
   }
   return lo;
+}
+
+function recentRoutes(data, time, limit) {
+  const src = srcFilter.value, dst = parseInt(dstFilter.value, 10);
+  const found = [];
+  for (let i = upperBoundTime(time, data) - 1; i >= 0 && found.length < limit; i--) {
+    const r = data[i];
+    if (time - r[0] > ORBIT_CFG.routeLifetime) break;
+    const key = (r[7] ? "T:" : "GS:") + r[2];
+    if ((src === "-1" || key === src) && (dst === -1 || r[3] === dst)) found.push(r);
+  }
+  return found;
 }
 
 function render() {
@@ -153,7 +166,8 @@ function render() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
   }
 
-  const snapshot = stateAt(simTime);
+  const mapTime = csvMapTime ?? simTime;
+  const snapshot = stateAt(mapTime);
   const sats = snapshot ? snapshot.nodes.slice(0, snapshot.numSats).map((p, idx) => ({ idx, lat: p[0], lon: p[1], alt: p[2] })) : [];
   const stStates = snapshot ? snapshot.nodes.slice(snapshot.numSats, snapshot.numSats + snapshot.numStations).map((p, id) => {
     const st = STATIONS.find(s => s.id === id) || { id, name: `GS${id}`, mobile: false };
@@ -181,15 +195,8 @@ function render() {
   const routeLifetime = ORBIT_CFG.routeLifetime;
   const maxRoutes = Math.max(0, ORBIT_CFG.maxRoutes);
   const endIdx = upperBoundTime(simTime);
-  const srcF = srcFilter.value, dstF = parseInt(dstFilter.value, 10);
-  const windowRoutes = [];
-  for (let i = endIdx - 1; i >= 0 && windowRoutes.length < 40; i--) {
-    const r = routes[i];
-    if (simTime - r[0] > routeLifetime) break;
-    const rSrcKey = (r[7] ? "T:" : "GS:") + r[2];
-    if ((srcF === "-1" || rSrcKey === srcF) && (dstF === -1 || r[3] === dstF)) windowRoutes.push(r);
-  }
-  const drawnRoutes = windowRoutes.slice(0, maxRoutes).reverse();
+  const windowRoutes = recentRoutes(routes, simTime, 40);
+  const drawnRoutes = (csvMapTime === null ? windowRoutes.slice(0, maxRoutes) : recentRoutes(resultMeta?.routes || [], mapTime, maxRoutes)).reverse();
   const activeSatSet = new Set();
 
   if (snapshot && document.getElementById("chkRoutes").checked) {
@@ -198,10 +205,10 @@ function render() {
       const srcSt = srcIsTerm ? terminalStates.find(s => s.id === srcId) : stStates.find(s => s.id === srcId);
       const dstSt = stStates.find(s => s.id === dstId);
       if (!srcSt || !dstSt || path.some(id => !sats[id])) return;
-      const age = Math.max(0, simTime - t);
-      const alpha = selectedRouteId === rId ? 1.0 : Math.max(0.15, 1.0 - age / routeLifetime);
+      const age = Math.max(0, mapTime - t);
+      const alpha = csvMapTime === null && selectedRouteId === rId ? 1.0 : Math.max(0.15, 1.0 - age / routeLifetime);
       const color = ROUTE_COLORS[idx % ROUTE_COLORS.length];
-      const width = selectedRouteId === rId ? 6 : 4;
+      const width = csvMapTime === null && selectedRouteId === rId ? 6 : 4;
       const pts = [[srcSt.lon, srcSt.lat]];
       path.forEach(satIdx => {
         if (sats[satIdx]) {
@@ -278,12 +285,12 @@ function render() {
   const avgMs = endIdx ? (sumMs / endIdx).toFixed(1) : "0.0";
   const avgHops = endIdx ? (sumHops / endIdx).toFixed(1) : "0.0";
 
-  document.getElementById("mapTime").textContent = `${simTime.toFixed(1)} s`;
+  document.getElementById("mapTime").textContent = `${mapTime.toFixed(1)} s`;
   document.getElementById("mapNetwork").textContent = snapshot ? `${sats.length} / ${islCount} / ${gslLinks.length}` : "N/A";
   document.getElementById("mapTraffic").textContent = snapshot ? `${snapshot.sent} / ${snapshot.received}` : "N/A";
   document.getElementById("mapMeasured").textContent = snapshot && snapshot.received ? `${(snapshot.delaySumSeconds * 1000 / snapshot.received).toFixed(2)} ms` : "N/A";
   document.getElementById("mapRouting").textContent = `${resultMeta?.config.activeConfig || "CSV"} | ${ORBIT_CFG.routingType} | ${ORBIT_CFG.metric}`;
-  document.getElementById("mapSample").textContent = snapshot ? `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation` : "No engine state for this data";
+  document.getElementById("mapSample").textContent = snapshot ? (csvMapTime === null ? `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation` : `참고 지도 · ${resultMeta.config.activeConfig} · ${snapshot.t.toFixed(3)} s · 선택 CSV와 별도`) : "No engine state for this data";
 
   document.getElementById("timeLabel").textContent = `t = ${simTime.toFixed(1)} s`;
   document.getElementById("timeSlider").value = simTime;
@@ -384,16 +391,26 @@ canvas.onmouseleave = () => { tooltip.hidden = true; };
 document.getElementById("csvInput").onchange = e => {
   const file = e.target.files[0];
   if (!file) return;
+  e.target.value = "";
   const reader = new FileReader();
   reader.onload = ev => {
     try {
       const parsed = parseRoutesCsv(ev.target.result);
-      clearResult(); routes = parsed;
-      syncTimeBounds(routes.length ? routes[routes.length - 1][0] : 0);
-      setStatus("External CSV: configuration and coordinates unverified. Planned route table only.");
+      const matchesMap = !!resultMeta && JSON.stringify(parsed) === JSON.stringify(resultMeta.routes);
+      // CSV has no coordinates: retain unmatched engine state as a labelled reference, never attach foreign paths.
+      csvMapTime = matchesMap ? null : (csvMapTime ?? simTime);
+      routes = parsed;
+      selectedRouteId = null;
+      playing = false;
+      document.getElementById("btnPlay").textContent = "Play";
+      simTime = routes.length ? Math.min(Math.max(simTime, routes[0][0]), routes[routes.length - 1][0]) : 0;
+      syncTimeBounds(matchesMap ? states[states.length - 1].t : (routes.length ? routes[routes.length - 1][0] : 0));
+      document.getElementById("csvSource").textContent = `선택 CSV: ${file.name} · ${routes.length.toLocaleString("ko-KR")}개 계획 경로`;
+      setStatus(matchesMap ? "선택한 CSV가 저장된 실행 결과와 일치합니다. 지도와 경로를 함께 재생합니다." : "선택한 CSV의 경로 표와 통계를 재생합니다. 위치 정보가 없어 지도는 기존 실행의 참고 화면으로 유지합니다.");
     } catch (err) { setStatus(`CSV error: ${err.message}`); }
     render();
   };
+  reader.onerror = () => setStatus("CSV 파일을 읽지 못했습니다. 기존 화면을 유지합니다.");
   reader.readAsText(file);
 };
 
@@ -508,7 +525,7 @@ function applyLoadedConfig(cfg, opts = {}) {
     stations: cfg.stations, terminals: cfg.terminals
   });
   if (Array.isArray(cfg.stations) || Array.isArray(cfg.terminals)) populateFilters();
-  if (cfg.simTimeLimit) syncTimeBounds(cfg.simTimeLimit);
+  if (cfg.simTimeLimit && csvMapTime === null) syncTimeBounds(cfg.simTimeLimit);
   }
 
   const active = resultMeta?.config.activeConfig || cfg.activeConfig || cfgNameSel.value;
