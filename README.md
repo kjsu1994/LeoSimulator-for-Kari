@@ -2,8 +2,8 @@
 
 ## 사용
 
-sim-ui.exe 또는 start_ui.bat을 실행합니다. 실행 구성 선택 → INI 편집 → 저장 →
-새로고침 → 실행 순서입니다. 계산은 UI 폴더의 engine/engine.exe가 수행합니다.
+sim-ui.exe 또는 start_ui.bat을 실행합니다. 실행 구성 선택 → 시나리오 설정 → INI에 저장 → 실행 순서입니다.
+INI 파일 버튼으로 메모장 편집도 가능합니다. 계산은 UI 폴더의 engine/engine.exe가 수행합니다.
 leo-main, OMNeT++, INET, WSL, Docker는 실행 시 필요하지 않습니다.
 배포 시 engine/, settings/, 화면 파일, replay-model.json을 EXE와 함께 둡니다.
 Python은 start_ui.bat에서만 필요하며 EXE에는 포함돼 있습니다. WebView2는 시스템
@@ -17,7 +17,9 @@ EXE로 실행하세요. INI 편집은 settings/simulations/Dijkstra132/omnetpp.i
 ## 결과
 
 실행마다 data/runs/<고유ID>/에 routes.csv, config/의 실제 INI 트리,
-manifest.json, engine-input.json, summary.json, events.csv, run.log를 보관합니다.
+manifest.json, normalized.json, engine-input.json, summary.json, timeseries.csv,
+network-events.jsonl, failures.csv, run.log를 보관합니다. 전체 패킷 기록을 선택한
+경우 events.csv도 기록합니다. 외부 시나리오·장애 입력은 inputs/에 함께 보관합니다.
 manifest에는 엔진 ID leo-native와 버전이 기록됩니다. 원본 FLoRaSat 실행 결과라고
 표시하지 않습니다. 이전 원본 결과 폴더도 계속 열 수 있습니다.
 
@@ -27,7 +29,10 @@ manifest에는 엔진 ID leo-native와 버전이 기록됩니다. 원본 FLoRaSa
 파일 누락·변경이나 지원하지 않는 모델이면 이전 지도를 유지합니다.
 보관된 INI는 새 설정을 편집해도 변경되지 않습니다.
 
-지도는 설정 기반 재현입니다. 실제 송수신/실측 지연 카드는 표시하지 않습니다.
+지도 좌표는 보관된 설정과 SGP4로 재현하고 장애·혼잡·CSIB 상태는 기록된 이벤트를
+반영합니다. 버전 2 결과에는 자체 엔진의 실제 패킷 송수신·폐기·지연·지터 통계와
+시간별 그래프가 표시됩니다. CSV만으로 수신 성공이나 큐 상태를 추정하지 않습니다.
+실행 비교에서 환경 해시와 송신 시도 해시가 같은지 확인할 수 있습니다.
 원본 결과와 native 결과는 엔진/난수 처리 차이가 있을 수 있습니다. 원본 알고리즘
 전체와 동일하거나 연구 타당성이 검증됐다고 주장하지 않습니다.
 
@@ -44,7 +49,9 @@ python engine/build.py
 ```
 
 개발용 C++ 빌드는 WSL의 MinGW를 사용합니다. 완성된 Windows 엔진은 WSL 없이 동작합니다.
-단독 컴파일된 엔진은 고정 그래프의 지연/홉 선택·동률·경로 없음 검사를 통과합니다.
+엔진 빌드는 고정 그래프 검사와 원본 MCSR 순수 코어의 5개 자체 검사를 수행합니다.
+`python verify_workloads.py`는 1,584위성·100지상국 조건에서 5개 알고리즘의
+10~60Mbps 짧은 실행 및 10/35/60Mbps 600초 실행 총 70개를 검사합니다.
 Python 검사는 반복 실행·패킷 보존·고부하 큐·최대 홉 폐기·INI 입력 검증을 포함합니다.
 원본과 전체 이벤트·유실·난수열의 완전 동등성 검증은 완료되지 않았습니다.
 
@@ -60,3 +67,8 @@ Python 검사는 반복 실행·패킷 보존·고부하 큐·최대 홉 폐기�
 실행합니다. C++ 개발 빌드에만 WSL Ubuntu의 g++-mingw-w64-x86-64가 필요합니다.
 빌드 결과는 dist/의 고유한 폴더와 ZIP이며 기존 사용자 결과는 포함하지 않습니다.
 배포 폴더에는 전체 소스·INI·라이선스·테스트와 새로 계산한 예제 결과가 포함됩니다.
+
+설정의 실제 큐 모드는 송신 패킷으로 부하를 생성합니다. 환경 효과 모드는 별도
+지정한 혼잡도·지연·손실을 주입하는 시험이며 결과에 구분해 기록됩니다.
+SRD K/L과 consistent 플러딩은 참조 프로파일과 구별되는 추가 실험 옵션입니다.
+DS·CSIB는 참조 코어의 시간 모델이며 실제 제어 패킷 트래픽은 생성하지 않습니다.

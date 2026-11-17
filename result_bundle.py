@@ -95,3 +95,30 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def make_native_bundle(inputs, directory, config_name, model_hash, config, run_id):
+    """Version 2 binds the exact normalized inputs and recorded metrics to replay."""
+    directory=Path(directory)
+    bundle,files=make_bundle(inputs,(directory/'routes.csv').read_bytes(),config_name,model_hash,run_id=run_id,provenance='native-simulation')
+    config_bytes=json.dumps(config,ensure_ascii=False,allow_nan=False,sort_keys=True).encode('utf-8')
+    files['normalized.json']=config_bytes
+    for name in ['summary.json','timeseries.csv','network-events.jsonl','failures.csv']:
+        files[name]=(directory/name).read_bytes()
+
+    if config.get('scenario'):files['scenario.json']=json.dumps(config['scenario'],ensure_ascii=False,allow_nan=False).encode('utf-8')
+    m=bundle['manifest'];m.update(format='leo-native-replay-v2',profile='leo-native-delta-v2',orbitModelHash=model_hash,
+                                normalizedPath='normalized.json',engine={'id':'leo-native','version':'2.0.0'})
+    if config.get('packetTrace'):
+        h=hashlib.sha256()
+        with (directory/'events.csv').open('rb') as stream:
+            for chunk in iter(lambda:stream.read(1048576),b''):h.update(chunk)
+        m['attachments']={'events.csv':{'sha256':h.hexdigest(),'bytes':(directory/'events.csv').stat().st_size}}
+    from comparison import fingerprint
+    m['environmentHash']=fingerprint(config)
+    for key,item in config.get('externalInputs',{}).items():
+        files['inputs/'+key+('.json' if key=='scenarioFile' else '.csv')]=item['text'].encode('utf-8')
+    m['inputHash']=hashlib.sha256(config_bytes).hexdigest()
+    m['files']={name:hashlib.sha256(data).hexdigest() for name,data in files.items()}
+    bundle['files']={name:data.decode('utf-8') for name,data in files.items()}
+    return bundle,files

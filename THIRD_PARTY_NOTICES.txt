@@ -93,3 +93,13 @@ Rebuild
 
 The included notices document the published upstream terms. They are not a
 representation of ownership of third-party code, nor an exclusive license.
+
+Changes dated 2026-11-17: the supplied leo-feature-csib-ds-model pure C++
+Routing_Core mcsr and congestion headers are preserved byte-for-byte under
+engine/vendor/routing/. SHA-256 fingerprints: engine/vendor/routing-origin.json.
+Reference core tests and their test-only Walker fixture are included under
+engine/tests/. They carry the supplied FLoRaSat project license; the combined
+program continues to be distributed under GPL-3.0-only with complete source.
+OMNeT++ and INET runtime libraries and headers are not shipped or required.
+The independent adapter, packet scheduler, INI normalization, asynchronous local
+runner and recorded-metric replay are modifications, not an upstream release.

@@ -2,8 +2,8 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>LEO Satellite Routing Simulator UI (Dijkstra132)</title>
-  <link rel="stylesheet" href="style.css?v=20261116-native-1">
+  <title>LEO Network Simulator</title>
+  <link rel="stylesheet" href="style.css?v=20261117-native-2">
 </head>
 <body>
   <header class="topbar">
@@ -52,7 +52,8 @@
         <div class="runner-head">
           <span id="scenarioHeading">시나리오</span>
           <div class="head-btns">
-            <button id="btnOpenIni" type="button" title="새 실행에 사용할 원본 INI를 편집합니다. 보관된 결과는 바뀌지 않습니다.">INI 편집</button>
+            <button id="btnSettings" type="button">설정</button>
+            <button id="btnOpenIni" type="button" title="새 실행에 사용할 원본 INI를 편집합니다. 보관된 결과는 바뀌지 않습니다.">INI 파일</button>
             <button id="btnRefreshIni" type="button" title="설정 새로고침" aria-label="설정 새로고침">🔄</button>
           </div>
         </div>
@@ -99,7 +100,7 @@
         </div>
         <p id="runModeHint" class="mode-hint" hidden>HTML은 저장된 결과를 재생하는 모드입니다. 설정 편집과 새 실행은 sim-ui.exe 또는 start_ui.bat으로 이용하세요.</p>
         <div id="runnerActions" class="runner-actions">
-          <button id="btnRunSim" type="button" class="btn-primary">선택 시나리오 실행</button>
+          <button id="btnRunSim" type="button" class="btn-primary">실행</button><button id="btnStopSim" type="button" hidden>중지</button><progress id="runProgress" max="1" value="0" hidden aria-label="계산 진행률"></progress>
         </div>
         <a id="resultFiles" hidden download></a>
         <div id="runStatus" class="run-status" hidden></div>
@@ -112,6 +113,13 @@
         <div><small>Predicted propagation / ISL hops</small><strong id="kpiDelay">47.6 ms / 3.4</strong></div>
       </div>
 
+      <section class="card native-metrics" id="nativeMetrics" hidden>
+        <div class="runner-head"><span>수신 결과</span><button id="btnCompare" type="button">실행 비교</button></div>
+        <div id="metricValues" class="metric-grid"></div>
+        <div class="chart-controls"><select id="metricFlow" aria-label="통계 흐름"></select><select id="metricSeries" aria-label="그래프 지표"><option value="throughput">처리량 (Mbps)</option><option value="delay">수신 지연 (ms)</option><option value="dropped">폐기 (개)</option><option value="queue">대기 패킷</option></select></div>
+        <canvas id="qosChart" width="800" height="260" aria-label="시간별 성능 그래프"></canvas><div id="chartCaption" class="quiet"></div>
+        <details><summary>흐름별 통계</summary><div class="table-scroll"><table id="flowMetrics"><thead><tr><th>출발→목적</th><th>수신/송신</th><th>전달률</th><th>지연</th><th>지터</th><th>홉</th></tr></thead><tbody></tbody></table></div></details>
+      </section>
       <div class="card toggles">
         <label><input type="checkbox" id="chkIsl" checked> ISLs</label>
         <label><input type="checkbox" id="chkGsl" checked> GSLs</label>
@@ -143,10 +151,13 @@
     </aside>
   </main>
 
-  <script src="data/latest_result.js?v=20261116-native-1"></script>
-  <script src="csv.js?v=20261116-native-1"></script>
-  <script src="bundle.js?v=20261116-native-1"></script>
-  <script src="orbit.js?v=20261116-native-1"></script>
-  <script src="app.js?v=20261116-native-1"></script>
+  <script src="data/latest_result.js?v=20261117-native-2"></script>
+  <script src="csv.js?v=20261117-native-2"></script>
+  <script src="bundle.js?v=20261117-native-2"></script>
+  <script src="orbit.js?v=20261117-native-2"></script>
+  <script src="app.js?v=20261117-native-2"></script>
+<dialog id="settingsDialog"><form id="settingsForm"><div class="dialog-heading"><h2>시나리오 설정</h2><button type="button" data-close="settingsDialog" aria-label="닫기">×</button></div><div id="settingsFields"></div><p id="settingsError" class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="settingsDialog">취소</button><button type="submit" class="btn-primary">INI에 저장</button></div></form></dialog>
+<dialog id="compareDialog"><div class="dialog-heading"><h2>실행 비교</h2><button data-close="compareDialog" aria-label="닫기">×</button></div><div class="compare-controls"><label>기준 실행<select id="baselineRun"></select></label><label>비교 실행<select id="scenarioRun"></select></label><button id="loadComparison" class="btn-primary">비교</button><label class="file-btn">기준 폴더<input id="baselineFolder" type="file" webkitdirectory multiple hidden></label><label class="file-btn">비교 폴더<input id="comparisonFolder" type="file" webkitdirectory multiple hidden></label></div><p id="comparisonStatus" role="status"></p><div id="comparisonContent"></div></dialog>
+<script src="editor.js?v=20261117-native-2"></script>
 </body>
 </html>

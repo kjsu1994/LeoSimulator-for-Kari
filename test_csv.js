@@ -3,7 +3,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const { parseRoutesCsv } = require("./csv.js");
-const raw = fs.readFileSync(`${__dirname}/data/routes.csv`, "utf8");
+const raw = fs.readFileSync(`${__dirname}/testdata/bundle/routes.csv`, "utf8");
 const rows = parseRoutesCsv(raw);
 assert.equal(rows.length, raw.trim().split(/\r?\n/).length - 1);
 assert(rows.every(r => r.length === 12 && r[4] === r[6].length - 1));

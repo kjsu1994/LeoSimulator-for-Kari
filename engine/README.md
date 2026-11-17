@@ -6,12 +6,16 @@ Windows 실행 파일 engine.exe는 OMNeT++/INET/WSL/Docker 없이 실행됩니�
 
 ## 알고리즘 추가
 
-1. algorithms.h의 Router 규격으로 함수를 구현합니다. 입력은 인접 리스트와 목적지이며,
-   출력은 각 노드의 next/hops/cost/delay 벡터입니다. 도달 불가는 next=-1, cost=무한대입니다.
-2. routingAlgorithms()에 ID와 경로 계산 함수·링크 가중치 함수를 등록합니다.
-3. 기존 INI의 Config에 `*.satellite[*].net.routing.algorithm = "등록ID"`를 추가합니다.
-   이 선택 키는 로컬 엔진용이며, 기존 INI에는 추가하지 않아도 됩니다.
-4. 엔진을 다시 빌드하고 고정 그래프·동률·경로 없음 검사와 전체 실행 검사를 수행합니다.
+1. main.cpp의 Routing 인터페이스(selectUplink, forward, onNetworkEvent, onTimer)를
+   구현합니다. Context가 현재 그래프·접속 후보·장애 정보와 이벤트 예약을 제공합니다.
+2. routingFactories()에 고유 ID와 어댑터 생성자를 등록합니다.
+3. native_engine.py의 ALGORITHMS와 필요한 설정 계약을 등록합니다.
+   기존 INI에서 `*.satellite[*].net.routing.algorithm = "등록ID"`로 선택합니다.
+4. 패킷 보존·장애·동일 송신 입력 검사와 verify_workloads.py를 수행합니다.
+
+Dijkstra는 algorithms.h, MCSR은 vendor/routing/mcsr의 원본 Planner/Router/
+Resilience/CSIB를 사용합니다. 어댑터와 실행 기반만 main.cpp에 구현합니다.
+원본 헤더 변경 여부는 vendor/routing-origin.json으로 확인할 수 있습니다.
 
 기본은 기존 metric="delay" 또는 "hop"이며 INI 형식과 키를 유지합니다.
 새 Config도 기존처럼 extends를 사용할 수 있습니다. NED나 OMNeT++ API를 구현하는
@@ -41,3 +45,9 @@ sent = received + dropped + inFlight입니다. noUplink는 송신 전 실패한 
 루트 LICENSE, THIRD_PARTY_NOTICES.txt, licenses/를 함께 제공합니다.
 별도 프로세스라는 이유만으로 모든 배포 의무가 없어진다고 간주하지 않습니다.
 코드/빌드 자료는 함께 제공하며 기관 납품 조건에 따른 이용 의무 검토는 별도입니다.
+
+유한 방향별 FIFO 큐의 기본 용량은 500패킷입니다. 0은 무제한입니다.
+링크 장애 시 대기 큐는 폐기하며 이미 전파 중인 패킷은 도착할 수 있습니다.
+summary의 수신 지연은 큐·직렬화·전파·복구 처리 지연을 포함합니다.
+지터는 흐름별 RFC 방식의 도착 간격 변동 추정값이며, 라우팅 비용 지터와 구별합니다.
+시계는 10^-11초 정수이며 송신·장애·환경 손실 난수를 분리합니다.

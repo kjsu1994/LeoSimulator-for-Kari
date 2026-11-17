@@ -3,8 +3,6 @@
 import csv
 import io
 import math
-import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 import http.server
 import json
@@ -15,7 +13,6 @@ import sys
 import threading
 import urllib.parse
 import webbrowser
-from result_bundle import make_bundle, write_bundle
 
 BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
 RUN_LOCK = threading.Lock()
@@ -41,19 +38,6 @@ def _strip_comment(raw):
 def _unquote(val):
     v = val.strip()
     return v[1:-1] if len(v) >= 2 and v[0] == '"' and v[-1] == '"' else v
-
-
-def _num(val, default=0.0):
-    m = re.match(r"[-+]?[0-9]*\.?[0-9]+", str(val).strip())
-    return float(m.group(0)) if m else default
-
-
-def _time_sec(val, default=0.0):
-    m = re.match(r"^\s*([-+]?[0-9]*\.?[0-9]+)\s*(ms|s|min|h|d)?", str(val).strip())
-    if not m:
-        return default
-    scale = {None: 1.0, "ms": 0.001, "s": 1.0, "min": 60.0, "h": 3600.0, "d": 86400.0}.get(m.group(2), 1.0)
-    return float(m.group(1)) * scale
 
 
 def _parse_ini_tree(entry_path):
@@ -123,64 +107,7 @@ def _resolve_chain(cfg_name, extends):
     return ["General"] + list(reversed([name for name in order(cfg_name, set()) if name != "General"]))
 
 
-def _parse_stations(items):
-    st_map = {}
-    for k, v in items:
-        m = re.match(r"^\*\.station\[(\d+)(?:\.\.(\d+))?\]\.(.+)$", k)
-        if not m:
-            continue
-        lo = int(m.group(1))
-        hi = int(m.group(2)) if m.group(2) else lo
-        prop = m.group(3)
-        val = _unquote(v)
-        for idx in range(lo, hi + 1):
-            st = st_map.setdefault(idx, {"id": idx, "name": f"Station {idx}", "lat": 0.0, "lon": 0.0, "alt": 0.0, "mobile": False})
-            if prop == "label":
-                st["name"] = val
-            elif prop == "nodeType":
-                st["mobile"] = (val == "mobile")
-            elif prop == "mobility.latitude":
-                st["lat"] = float(val)
-            elif prop == "mobility.longitude":
-                st["lon"] = float(val)
-            elif prop == "mobility.altitudeKm":
-                st["alt"] = _num(val)
-            elif prop == "mobility.speed":
-                st["speed"] = _num(val)
-            elif prop == "mobility.routeStart":
-                st["start"] = _num(val)
-            elif prop == "mobility.route":
-                pts = []
-                for pair in val.split():
-                    if "," in pair:
-                        a, b = pair.split(",", 1)
-                        pts.append([float(a), float(b)])
-                if pts:
-                    st["route"] = pts
-                    st["lat"], st["lon"] = pts[0][0], pts[0][1]
-    return [st_map[i] for i in sorted(st_map)]
-
-
-def _parse_terminals(items, limit):
-    if limit <= 0:
-        return []
-    t_map = {}
-    for k, v in items:
-        m = re.match(r"^\*\.terminal\[(\d+)\]\.mob\.(centerLatitude|centerLongitude)$", k)
-        if not m:
-            continue
-        idx = int(m.group(1))
-        if idx >= limit:
-            continue
-        t = t_map.setdefault(idx, {"id": idx, "name": f"T{idx}", "lat": 0.0, "lon": 0.0, "alt": 0.0})
-        if m.group(2) == "centerLatitude":
-            t["lat"] = _num(v)
-        else:
-            t["lon"] = _num(v)
-    return [t_map[i] for i in sorted(t_map)]
-
-
-def read_ini_config(config_name=None, entry_path=None):
+def read_ini_config(config_name=None, entry_path=None, variables=None):
     configs, sections, extends = _parse_ini_tree(entry_path or INI_PATH)
     names = [c["name"] for c in configs]
     if config_name is not None and config_name not in names:
@@ -188,33 +115,14 @@ def read_ini_config(config_name=None, entry_path=None):
     active = config_name or (names[0] if names else "Dijkstra132")
     chain = _resolve_chain(active, extends)
 
-    flat = {}
-    items = []
     resolved = {}
     for sec in chain:
-        for k, v in reversed(sections.get(sec, [])):
-            flat[k] = _unquote(v)
-            items.append((k, v))
-            if k in resolved:
-                del resolved[k]
-            resolved[k] = {"k": k, "v": v, "sec": sec}
-
-    def get_num(keys, default, conv=_num):
-        for k in keys:
-            if k in flat:
-                return conv(flat[k], default)
-        return default
-
-    def get_str(keys, default):
-        for k in keys:
-            if k in flat:
-                return flat[k]
-        return default
-
-    num_terminals = int(get_num(["**.numTerminals", "*.numTerminals"], 0))
-    desc = next((c["description"] for c in configs if c["name"] == active), "")
-
-    return {
+        for k,v in reversed(sections.get(sec,[])):
+            if k in resolved:del resolved[k]
+            resolved[k]={"k":k,"v":v,"sec":sec}
+    desc=next((c['description'] for c in configs if c['name']==active),'')
+    selectable=[c for c in configs if c['name']!='Dijkstra132Terminals' and dict(sections.get(c['name'],[])).get('abstract')!='true']
+    cfg = {
         "iniPath": entry_path or INI_PATH,
         "leoFound": bool(LEO_DIR),
         "leoDir": LEO_DIR,
@@ -222,27 +130,14 @@ def read_ini_config(config_name=None, entry_path=None):
         "description": desc,
         "extends": extends.get(active, []),
         "chain": chain,
-        "configs": [{**c, "extends": extends.get(c["name"], [])} for c in configs if c["name"] != "Dijkstra132Terminals"],
+        "configs": [{**c, "extends": extends.get(c["name"], [])} for c in selectable],
         "ownEntries": [{"k": k, "v": v} for k, v in sections.get(active, [])],
         "effectiveEntries": list(resolved.values()),
-        "simTimeLimit": get_num(["sim-time-limit"], 600.0, _time_sec),
-        "minimumElevation": get_num(["*.topologyControl.minimumElevation"], 10.0),
-        "metric": get_str(["*.satellite[*].net.routing.metric"], "delay"),
-        "routingType": get_str(["*.satellite[*].net.routingType"], "Sat_Net_DijkstraRouting"),
-        "altitude": get_num(["*.constellationCreator.altitude"], 550.0),
-        "inclination": get_num(["*.constellationCreator.inclination"], 53.0),
-        "numSatellites": int(get_num(["*.numSatellites"], 132)),
-        "planes": int(get_num(["*.**.planeCount", "*.constellationCreator.planeCount"], 12)),
-        "phasing": int(get_num(["*.**.interPlaneSpacing", "*.constellationCreator.interPlaneSpacing"], 1)),
-        "raanSpread": get_num(["*.constellationCreator.raanSpread"], 360.0),
-        "baseYear": int(get_num(["*.constellationCreator.baseYear"], 20)),
-        "baseDay": get_num(["*.constellationCreator.baseDay"], 1.5),
-        "maxRoutes": int(get_num(["*.mapDataSource.maxRoutes"], 8)),
-        "routeLifetime": get_num(["*.mapDataSource.routeLifetime"], 30.0, _time_sec),
-        "numTerminals": num_terminals,
-        "stations": _parse_stations(items),
-        "terminals": _parse_terminals(items, num_terminals),
+        "terminals": [],
     }
+    cfg["variables"] = variables or {}
+    from native_engine import configuration
+    return configuration(cfg)
 
 
 def parse_routes_csv(csv_text):
@@ -279,48 +174,12 @@ def parse_routes_csv(csv_text):
     return routes
 
 
-def export_offline_result(result):
-    target = Path(BASE_DIR, "data/latest_result.js")
-    tmp = target.with_suffix(".tmp")
-    tmp.write_text("window.SIM_RESULT=" + json.dumps(result, ensure_ascii=True, allow_nan=False) + ";\n", encoding="utf-8")
-    os.replace(tmp, target)
-
-
 def run_simulation(config_name="Dijkstra132"):
     if not RUN_LOCK.acquire(blocking=False):
         raise RuntimeError("Another simulation is running")
     try:
-        from native_engine import configuration
-        files = {p.relative_to(LEO_DIR).as_posix(): p.read_bytes() for p in Path(LEO_DIR).rglob("*.ini")}
-        cfg = configuration(read_ini_config(config_name))
-        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + uuid.uuid4().hex
-        run_dir = Path(BASE_DIR, "data", "runs", run_id)
-        run_dir.mkdir(parents=True)
-        input_path = run_dir / "engine-input.json"
-        input_path.write_text(json.dumps(cfg, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-        executable = Path(BASE_DIR, "engine", "engine.exe")
-        if not executable.is_file():
-            raise ValueError("Local engine is missing")
-        proc = subprocess.run([str(executable), str(input_path), str(run_dir)], capture_output=True, timeout=600, creationflags=NO_WIN)
-        (run_dir / "run.log").write_bytes(proc.stdout + proc.stderr)
-        if proc.returncode:
-            raise RuntimeError(proc.stderr.decode("utf-8", errors="replace"))
-        raw = (run_dir / "routes.csv").read_bytes()
-        parse_routes_csv(raw.decode("utf-8-sig"))
-        profile = json.loads(Path(BASE_DIR, "replay-model.json").read_text(encoding="utf-8"))
-        bundle, payload = make_bundle(files, raw, config_name, profile["modelHash"], run_id=run_id,
-                                     command=["engine.exe", "engine-input.json", "."])
-        bundle["manifest"]["engine"] = {"id": "leo-native", "version": "1.0.0"}
-        bundle["manifest"]["provenance"] = "native-simulation"
-        write_bundle(run_dir, bundle, payload)
-        result = {"ok": True, "bundle": bundle, "runId": run_id}
-        (run_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, allow_nan=False), encoding="utf-8")
-        export_offline_result(result)
-        pointer = Path(BASE_DIR, "data", "latest.json")
-        tmp = pointer.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"runId": run_id}), encoding="utf-8")
-        os.replace(tmp, pointer)
-        return result
+        from run_manager import execute
+        return execute(BASE_DIR, LEO_DIR, INI_PATH, config_name, read_ini_config)
     finally:
         RUN_LOCK.release()
 
@@ -342,18 +201,35 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/runs":
+            from comparison import runs
+            return self.send_json(runs(BASE_DIR))
+        if parsed.path.startswith("/api/run/"):
+            from run_manager import state
+            try:
+                return self.send_json(state(parsed.path.rsplit("/",1)[-1]))
+            except ValueError as exc:
+                return self.send_json({"error":str(exc)},404)
+        if parsed.path == "/api/compare":
+            from comparison import compare
+            qs=urllib.parse.parse_qs(parsed.query)
+            try:
+                return self.send_json(compare(BASE_DIR,qs.get("baseline",[""])[0],qs.get("run",[""])[0]))
+            except (ValueError,OSError,KeyError) as exc:
+                return self.send_json({"error":str(exc)},400)
         if parsed.path == "/api/config":
             qs = urllib.parse.parse_qs(parsed.query)
             cfg_name = qs.get("config", [None])[0]
             try:
-                return self.send_json(read_ini_config(cfg_name))
+                from run_manager import load_external_inputs
+                return self.send_json(load_external_inputs(read_ini_config(cfg_name), INI_PATH))
             except (ValueError, OSError) as exc:
                 return self.send_json({"error": str(exc)}, 400)
         if parsed.path == "/api/result":
             pointer = Path(BASE_DIR, "data/latest.json")
             if not pointer.exists():
                 return self.send_json(None)
-            run_id = json.loads(pointer.read_text())["runId"]
+            run_id = urllib.parse.parse_qs(parsed.query).get("runId", [json.loads(pointer.read_text())["runId"]])[0]
             if not re.fullmatch(r"[A-Za-z0-9-]+", run_id):
                 return self.send_json({"error": "Invalid result pointer"}, 500)
             return self.send_json(json.loads(Path(BASE_DIR, "data/runs", run_id, "result.json").read_text(encoding="utf-8")))
@@ -364,7 +240,7 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
             return self.send_json({"error": "Origin rejected"}, 403)
         try:
             length = int(self.headers.get("Content-Length", 0))
-            if not 0 <= length <= 4096:
+            if not 0 <= length <= 1048576:
                 raise ValueError("Request too large")
             body = json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
             if not isinstance(body, dict):
@@ -381,12 +257,28 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
             except (ValueError, OSError) as exc:
                 return self.send_json({"error": str(exc)}, 400)
 
+        if self.path == "/api/config":
+            try:
+                from config_editor import edit
+                from run_manager import CONFIG_LOCK
+                with CONFIG_LOCK:
+                    result=edit(INI_PATH,body.get("configName"),body.get("changes",{}),read_ini_config,body.get("scenario"))
+                return self.send_json(result)
+            except (ValueError,OSError,KeyError) as exc:
+                return self.send_json({"error":str(exc)},400)
         if self.path == "/api/run":
             try:
-                cfg_name = body.get("configName") or read_ini_config().get("activeConfig", "Dijkstra132")
-                return self.send_json(run_simulation(cfg_name))
-            except Exception as e:
-                return self.send_json({"ok": False, "error": str(e)}, status=500)
+                from run_manager import start
+                name=body.get("configName") or read_ini_config()["activeConfig"]
+                return self.send_json(start(BASE_DIR,LEO_DIR,INI_PATH,name,read_ini_config,body.get("variables")),202)
+            except (ValueError,OSError,KeyError) as exc:
+                return self.send_json({"ok":False,"error":str(exc)},400)
+        if self.path.startswith("/api/run/") and self.path.endswith("/cancel"):
+            try:
+                from run_manager import cancel
+                return self.send_json(cancel(self.path.split("/")[-2]))
+            except ValueError as exc:
+                return self.send_json({"error":str(exc)},404)
 
         self.send_error(404)
 
@@ -405,4 +297,6 @@ if __name__ == "__main__":
         webbrowser.open(url)
         input(f"Running at {url} (Press Enter to quit)...\n")
     finally:
+        from run_manager import shutdown
+        shutdown()
         srv.shutdown()

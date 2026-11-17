@@ -14,7 +14,7 @@ ROW = "1.2,1,GS0,2,3,4,1,2.5,3.5,6,3-4\n"
 
 class DataTests(unittest.TestCase):
     def test_all_existing_csv_fields_survive(self):
-        raw = Path(server.BASE_DIR, "data/routes.csv").read_text()
+        raw = Path(server.BASE_DIR, "testdata/bundle/routes.csv").read_text()
         rows = list(csv.DictReader(io.StringIO(raw)))
         actual = server.parse_routes_csv(raw)
         self.assertEqual(len(actual), len(rows))
@@ -59,16 +59,6 @@ class DataTests(unittest.TestCase):
                 httpd.server_close()
                 thread.join()
 
-    def test_offline_export_preserves_result(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            Path(tmp, "data").mkdir()
-            result = {"runId": "test", "routes": [[1, 2]], "states": [{"t": 1}], "config": {"description": "saved"}}
-            with patch.object(server, "BASE_DIR", tmp):
-                server.export_offline_result(result)
-            script = Path(tmp, "data/latest_result.js").read_text()
-            self.assertEqual(json.loads(script.removeprefix("window.SIM_RESULT=").strip().removesuffix(";")), result)
-            self.assertFalse(Path(tmp, "data/latest_result.tmp").exists())
-
     def test_missing_include_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp, "omnetpp.ini")
@@ -100,6 +90,7 @@ class DataTests(unittest.TestCase):
         base["simTimeLimit"]=2
         base["minimumElevation"]=-90
         base["maxGroundLinks"]=500
+        base["packetTrace"]=True
         base["groundlinkDatarate"]=1000000
         base["islDatarate"]=1000000
         for st in base["stations"]:
@@ -146,7 +137,7 @@ class DataTests(unittest.TestCase):
     def test_native_rejects_invalid_settings(self):
         from native_engine import configuration
         cfg=server.read_ini_config("Dijkstra132")
-        cfg["planes"]=0
+        cfg["effectiveEntries"].append({"k":"*.**.planeCount","v":"0","sec":"probe"})
         with self.assertRaises(ValueError): configuration(cfg)
 
 if __name__ == "__main__":

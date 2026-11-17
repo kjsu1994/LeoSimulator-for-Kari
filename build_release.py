@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import sys
 import uuid
+import hashlib
+import json
 
 ROOT = Path(__file__).resolve().parent
 SOURCE_FILES = sorted({p.name for pattern in ("*.py", "*.js", "*.html", "*.css", "*.bat") for p in ROOT.glob(pattern)} | {
@@ -27,7 +29,6 @@ def stage(destination, executable):
     shutil.copy2(executable, destination / "sim-ui.exe")
     (destination / "data").mkdir()
     shutil.copy2(ROOT / "data/earth.png", destination / "data/earth.png")
-    shutil.copy2(ROOT / "testdata/bundle/routes.csv", destination / "data/routes.csv")
     return destination
 
 
@@ -38,7 +39,11 @@ def main():
         subprocess.run([sys.executable, "-m", "venv", str(env)], check=True)
     subprocess.run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
                     "-r", str(ROOT / "requirements-build.txt")], check=True)
-    subprocess.run([str(python), str(ROOT / "engine/build.py")], check=True)
+    if '--use-built-engine' in sys.argv:
+        info=json.loads((ROOT/'engine/build-info.json').read_text())
+        actual={p.relative_to(ROOT/'engine').as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in (ROOT/'engine').rglob('*') if p.is_file() and p.suffix in ('.h','.cpp','.cc')}
+        if info['sources']!=actual or info['sha256']!=hashlib.sha256((ROOT/'engine/engine.exe').read_bytes()).hexdigest():raise ValueError('Native source/build mismatch')
+    else:subprocess.run([str(python), str(ROOT / "engine/build.py")], check=True)
     binaries = ROOT / "dist/binaries"
     subprocess.run([str(python), "-m", "PyInstaller", "--noconfirm", "--clean",
                     "--distpath", str(binaries), "--workpath", str(ROOT / "build/release-pyinstaller"),

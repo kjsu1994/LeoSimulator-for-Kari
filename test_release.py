@@ -10,7 +10,7 @@ class ReleaseTests(unittest.TestCase):
     def test_source_licenses_and_settings_are_included_without_user_results(self):
         with tempfile.TemporaryDirectory() as tmp:
             package = build_release.stage(Path(tmp) / "delivery", build_release.ROOT / "sim-ui.exe")
-            self.assertEqual({p.name for p in (package / "data").iterdir()}, {"earth.png", "routes.csv"})
+            self.assertEqual({p.name for p in (package / "data").iterdir()}, {"earth.png"})
             for file in ("LICENSE", "THIRD_PARTY_NOTICES.txt", "licenses/LGPL-3.0.txt",
                          "licenses/Microsoft-WebView2-1.0.3856.49.txt", "engine/main.cpp",
                          "engine/algorithms.h", "engine/vendor/json.hpp", "server.py", "sim-ui.spec"):
