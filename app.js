@@ -33,7 +33,7 @@ function installResult(result) {
   simTime = Math.min(1210, result.replay ? result.config.simTimeLimit : (states.length ? states[states.length - 1].t : 0));
   applyLoadedConfig(result.config, { result: true });
   syncTimeBounds(result.replay ? result.config.simTimeLimit : (states.length ? states[states.length - 1].t : 0));
-  setStatus(`${result.config.activeConfig} 실행 결과를 불러왔습니다.`);
+  setStatus(`${scenarioName(result.config.activeConfig)} · ${algorithmName(result.config)} 실행 결과를 불러왔습니다.`);
   const download = document.getElementById("resultFiles");
   download.hidden = false;
   download.href = `data/runs/${result.runId}/${result.replay ? "routes.csv" : "results/routes.csv"}`;
@@ -300,8 +300,8 @@ function render() {
   document.getElementById("mapSatellites").textContent = snapshot ? `${sats.length.toLocaleString("ko-KR")}기` : "—";
   document.getElementById("mapIsl").textContent = snapshot ? `${islCount.toLocaleString("ko-KR")}개` : "—";
   document.getElementById("mapGroundLinks").textContent = snapshot ? `${gslLinks.length.toLocaleString("ko-KR")}개` : "—";
-  document.getElementById("mapRouting").textContent = `${resultMeta?.config.activeConfig || previewConfig?.activeConfig || "CSV"} · ${resultMeta?.config.algorithm || ORBIT_CFG.metric}${resultMeta?.summary?.experimental?" · 환경/실험 설정":""}`;
-  document.getElementById("mapSample").textContent = snapshot && !resultMeta ? "설정 미리보기 · 실행 결과와 별도" : snapshot ? (snapshot.reconstructed && csvMapTime === null ? "설정 기반 재현 · 기록된 경로" : csvMapTime === null ? `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation` : `참고 지도 · ${resultMeta.config.activeConfig} · ${snapshot.t.toFixed(3)} s · 선택 CSV와 별도`) : "No engine state for this data";
+  document.getElementById("mapRouting").textContent = `${scenarioName(resultMeta?.config.activeConfig || previewConfig?.activeConfig || "CSV")} · ${algorithmName(resultMeta?.config||previewConfig)}${resultMeta?.summary?.experimental?" · 환경/실험 설정":""}`;
+  document.getElementById("mapSample").textContent = snapshot && !resultMeta ? "설정 미리보기 · 실행 결과와 별도" : snapshot ? (snapshot.reconstructed && csvMapTime === null ? "설정 기반 재현 · 기록된 경로" : csvMapTime === null ? `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation` : `참고 지도 · ${scenarioName(resultMeta.config.activeConfig)} · ${snapshot.t.toFixed(3)} s · 선택 CSV와 별도`) : "No engine state for this data";
 
   document.getElementById("timeLabel").textContent = `t = ${simTime.toFixed(1)} s`;
   document.getElementById("timeSlider").value = simTime;
@@ -439,7 +439,9 @@ function setStatus(msg) {
 const escHtml = s => String(s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 const iniFilter = document.getElementById("iniFilter");
 const chkShowNodes = document.getElementById("chkShowNodes");
-let currentEffectiveEntries = [];
+let currentEffectiveEntries = [],iniLabels={};
+const INI_NAMES={sendInterval:"송신 간격",packetSize:"패킷 크기",startTime:"송신 시작",endTime:"송신 종료",enabled:"사용 여부",dstType:"목적지 종류",dstStation:"목적지 노드",metric:"경로 선택 기준",service:"MCSR 서비스",routingType:"라우팅 모듈",algorithm:"알고리즘",numSatellites:"위성 수",numTerminals:"단말 수",nrOfGS:"지상 노드 수","sim-time-limit":"실행 시간","seed-0-mt":"난수 시드"};
+function iniLabel(key){return iniLabels[key]||INI_NAMES[key.split(".").at(-1)]||"";}
 
 function flashEl(el) {
   if (!el) return;
@@ -455,11 +457,11 @@ function renderIniTable() {
   const showNodes = chkShowNodes.checked;
   const rows = currentEffectiveEntries.filter(e => {
     if (!showNodes && !q && /^\*\.(station|terminal)\[\d+\]\.(mob|mobility|label|nodeType)/.test(e.k)) return false;
-    return !q || e.k.toLowerCase().includes(q) || String(e.v).toLowerCase().includes(q) || e.sec.toLowerCase().includes(q);
+    return !q || iniLabel(e.k).toLowerCase().includes(q) || e.k.toLowerCase().includes(q) || String(e.v).toLowerCase().includes(q) || e.sec.toLowerCase().includes(q);
   });
   document.querySelector("#iniTable tbody").innerHTML = rows.map(e => {
     const ov = e.sec !== "General" ? " class=\"ini-override\"" : "";
-    return `<tr${ov}><td class="ini-k" title="${escHtml(e.k)}">${escHtml(e.k)}</td><td class="ini-v" title="${escHtml(e.v)}">${escHtml(e.v)}</td><td class="ini-s">[${escHtml(e.sec)}]</td></tr>`;
+    return `<tr${ov}><td class="ini-k" title="${escHtml(e.k)}">${iniLabel(e.k)?`<strong class="ini-label">${escHtml(iniLabel(e.k))}</strong>`:""}${escHtml(e.k)}</td><td class="ini-v" title="${escHtml(e.v)}">${escHtml(e.v)}</td><td class="ini-s">[${escHtml(e.sec)}]</td></tr>`;
   }).join("");
   document.getElementById("iniCount").textContent = `표시 ${rows.length} / 전체 ${currentEffectiveEntries.length}개 INI 키 (파란 강조 = 상속/시나리오 설정)`;
 }
@@ -467,15 +469,55 @@ function renderIniTable() {
 iniFilter.oninput = renderIniTable;
 chkShowNodes.onchange = renderIniTable;
 
+const SCENARIO_NAMES={
+  Dijkstra132:"기본 통신",Dijkstra132Pair:"단일 구간 통신",Dijkstra132StationsOnly:"지상국 간 통신",Dijkstra132PairFail:"반복 링크 장애",Dijkstra132RandomFail:"무작위 링크 장애",
+  PaperS1:"대규모 단일 구간",PaperS1Load:"대규모 부하",PaperS1DijkstraCutFlood:"대규모 장애·복구"
+};
+const ADDITIONAL_CONFIGS=new Set("Dijkstra132Hop Mcsr132 Mcsr132TS Mcsr132HR Mcsr132Pair Mcsr132PairFail Mcsr132RandomFail PaperS1Mcsr PaperS1McsrTS PaperS1McsrHR PaperS1Dijkstra PaperS1McsrFail PaperS1DijkstraFail PaperS1McsrCut PaperS1DijkstraCut PaperS1McsrCongestion PaperS1DijkstraCongestion PaperS1DijkstraCongestionAware PaperS1McsrCutFlood PaperS1McsrCutFloodRes PaperS1DijkstraCutFloodLoad PaperS1McsrCutFloodLoad PaperS1McsrCutFloodResLoad PaperS1McsrCsib".split(" "));
+const ALGORITHM_NAMES={"dijkstra-delay":"Dijkstra · 지연 최소","dijkstra-hop":"Dijkstra · 홉 최소","mcsr-ls":"MCSR · 지연 우선 (LS)","mcsr-ts":"MCSR · 처리량 우선 (TS)","mcsr-hr":"MCSR · 신뢰성 우선 (HR)"};
+function scenarioName(name){
+  if(SCENARIO_NAMES[name])return SCENARIO_NAMES[name];
+  if(!ADDITIONAL_CONFIGS.has(name))return name||"결과를 선택하세요";
+  const base=name.startsWith("PaperS1")?"대규모 ":"";
+  const kind=name.includes("CongestionAware")?"혼잡 · 지연 반영":name.includes("Congestion")?"혼잡":name.includes("CutFloodResLoad")?"장애·복구 · 예비 경로·배경 부하":name.includes("CutFloodLoad")?"장애·복구 · 배경 부하":name.includes("CutFloodRes")?"장애·복구 · 예비 경로":name.includes("CutFlood")?"장애·복구":name.includes("PairFail")||name.includes("Cut")?"반복 링크 장애":name.includes("Fail")?"무작위 링크 장애":name.includes("Csib")?"DS·CSIB":name.includes("Pair")?"단일 구간 통신":"기본 통신";
+  return base+kind;
+}
+function algorithmName(cfg){return ALGORITHM_NAMES[cfg?.algorithm]||cfg?.algorithm||ALGORITHM_NAMES["dijkstra-"+(cfg?.metric||"delay")];}
+let selectedConfig=null,configSaving=false,configLoading=false;
+function populateConfigChoices(cfg){
+  const all=document.getElementById("showAllConfigs").checked;
+  cfgNameSel.replaceChildren();
+  for(const c of cfg.configs||[]){
+    const basic=Object.hasOwn(SCENARIO_NAMES,c.name),custom=!ADDITIONAL_CONFIGS.has(c.name);
+    if(!all&&!basic&&!custom&&c.name!==cfg.activeConfig)continue;
+    const opt=new Option(scenarioName(c.name)+(basic||custom?"":` (${c.name})`),c.name);opt.title=c.name;cfgNameSel.add(opt);
+  }
+  cfgNameSel.value=cfg.activeConfig;
+}
+document.getElementById("showAllConfigs").onchange=()=>{if(selectedConfig)populateConfigChoices(selectedConfig);};
+// This changes only the algorithm in the selected INI section, never the recorded result.
+document.getElementById("algorithmChoice").onchange=async event=>{
+  if(configSaving||configLoading||!selectedConfig)return;
+  const cfg=selectedConfig,algorithm=event.target.value;
+  const controls=[cfgNameSel,event.target,...["btnRunSim","btnExperiment","btnSettings","btnRefreshIni","btnOpenIni","showAllConfigs"].map(id=>document.getElementById(id))];
+  const states=controls.map(e=>e.disabled);configSaving=true;controls.forEach(e=>e.disabled=true);
+  try{
+    const response=await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfg.activeConfig,changes:{algorithm}})});
+    const result=await response.json();if(!response.ok)throw Error(result.error||"알고리즘을 저장하지 못했습니다.");
+    applyLoadedConfig(result,{announce:true});
+  }catch(error){event.target.value=cfg.algorithm;setStatus(error.message);}
+  finally{configSaving=false;controls.forEach((e,i)=>e.disabled=states[i]);}
+};
+
 function updateProfileBox(cfg, highlight) {
-  document.getElementById("savedConfigName").textContent = cfg.activeConfig || "결과를 선택하세요";
+  document.getElementById("savedConfigName").textContent = scenarioName(cfg.activeConfig);
   const entries = cfg.effectiveEntries || [];
   const value = key => entries.find(e => e.k === key)?.v;
   document.getElementById("scenarioConstellation").textContent = cfg.numSatellites == null ? "—" : `${cfg.numSatellites}기 · ${cfg.planes}개 궤도면`;
   document.getElementById("scenarioOrbit").textContent = cfg.altitude == null ? "—" : `${cfg.altitude} km · ${cfg.inclination}°`;
   document.getElementById("scenarioDuration").textContent = cfg.simTimeLimit == null ? "—" : `${cfg.simTimeLimit.toLocaleString("ko-KR")}초`;
   const routing = { delay: "지연 최소", hop: "홉 수 최소" };
-  document.getElementById("scenarioRouting").textContent = ({"mcsr-ls":"MCSR · LS","mcsr-ts":"MCSR · TS","mcsr-hr":"MCSR · HR"})[cfg.algorithm] || routing[cfg.metric] || cfg.metric || "—";
+  document.getElementById("scenarioRouting").textContent = ({"mcsr-ls":"MCSR · 지연 우선 (LS)","mcsr-ts":"MCSR · 처리량 우선 (TS)","mcsr-hr":"MCSR · 신뢰성 우선 (HR)"})[cfg.algorithm] || routing[cfg.metric] || cfg.metric || "—";
   const interval = value("*.station[*].traffic.sendInterval");
   const size = value("*.station[*].traffic.packetSize");
   document.getElementById("scenarioTraffic").textContent = interval && size ? `${interval} · ${size}` : (cfg.activeConfig ? "노드별 설정" : "—");
@@ -513,14 +555,13 @@ function updateProfileBox(cfg, highlight) {
 
 function applyLoadedConfig(cfg, opts = {}) {
   if (!cfg) return;
+  selectedConfig=cfg;
+  const algorithmChoice=document.getElementById("algorithmChoice");
+  algorithmChoice.replaceChildren();
+  for(const [id,label]of Object.entries(cfg.capabilities?.algorithms||ALGORITHM_NAMES))algorithmChoice.add(new Option(ALGORITHM_NAMES[id]||label,id));
+  algorithmChoice.value=cfg.algorithm||"dijkstra-"+(cfg.metric||"delay");
   if (Array.isArray(cfg.configs) && cfg.configs.length) {
-    cfgNameSel.innerHTML = "";
-    cfg.configs.forEach(c => {
-      const opt = new Option(c.name, c.name);
-      if (c.description) opt.title = c.description;
-      cfgNameSel.add(opt);
-    });
-    if (cfg.activeConfig) cfgNameSel.value = cfg.activeConfig;
+    populateConfigChoices(cfg);
     cfgNameSel.dataset.loaded = "1";
   }
 
@@ -528,7 +569,7 @@ function applyLoadedConfig(cfg, opts = {}) {
   const resultKey = resultMeta ? JSON.stringify([resultMeta.config.activeConfig, resultMeta.config.effectiveEntries]) : "";
   const showingPreviousRun = !!resultMeta && !opts.result && resultKey !== configKey;
   if (showingPreviousRun) {
-    setStatus(`지도에는 [${resultMeta.config.activeConfig}]의 마지막 실행 결과가 표시됩니다. 선택한 [${cfg.activeConfig}] 설정을 반영하려면 실행하세요.`);
+    setStatus(`지도에는 [${scenarioName(resultMeta.config.activeConfig)} · ${algorithmName(resultMeta.config)}]의 마지막 실행 결과가 표시됩니다. 선택한 [${scenarioName(cfg.activeConfig)} · ${algorithmName(cfg)}] 설정을 반영하려면 실행하세요.`);
   }
   loadedConfigKey = configKey;
   if (opts.result || !resultMeta) {
@@ -540,17 +581,18 @@ function applyLoadedConfig(cfg, opts = {}) {
 
   const active = resultMeta?.config.activeConfig || cfg.activeConfig || cfgNameSel.value;
   const rShort = (ORBIT_CFG.routingType || "Routing").replace(/^Sat_Net_|Routing$/g, "");
-  document.title = `LEO Network Simulator (${active})`;
+  document.title = `LEO Network Simulator (${scenarioName(active)})`;
   document.getElementById("topBadge").textContent =
-    `${active} · Walker-Delta ${ORBIT_CFG.numSatellites}/${ORBIT_CFG.planes}/${ORBIT_CFG.phasing} · ${ORBIT_CFG.altitude}km · ${ORBIT_CFG.inclination}° · ${cfg.algorithm || rShort}`;
+    `${scenarioName(active)} · Walker-Delta ${ORBIT_CFG.numSatellites}/${ORBIT_CFG.planes}/${ORBIT_CFG.phasing} · ${ORBIT_CFG.altitude}km · ${ORBIT_CFG.inclination}° · ${algorithmName(resultMeta?.config||cfg)}`;
 
   window.dispatchEvent(new CustomEvent("sim-config",{detail:cfg}));
+  iniLabels=Object.fromEntries((cfg.capabilities?.fields||[]).map(f=>[f.ini,f.label]));
   currentEffectiveEntries = Array.isArray(cfg.effectiveEntries) ? cfg.effectiveEntries : [];
   updateProfileBox(cfg, !!opts.announce);
   renderIniTable();
 
   if (opts.announce && !showingPreviousRun) {
-    setStatus(`${active} 설정을 불러왔습니다.`);
+    setStatus(`${scenarioName(cfg.activeConfig)} · ${algorithmName(cfg)} 설정을 불러왔습니다.`);
   }
   render();
 }
@@ -562,10 +604,12 @@ if (location.protocol.startsWith("http")) {
   let configRequest = 0;
   const fetchConfig = (cfg, announce = false) => {
     const request = ++configRequest;
+    configLoading=true;document.getElementById("algorithmChoice").disabled=true;
     return fetch(cfg ? `/api/config?config=${encodeURIComponent(cfg)}` : "/api/config", { cache: "no-store" })
       .then(r => { if (!r.ok) throw new Error("설정을 불러오지 못했습니다."); return r.json(); })
       .then(d => { if (request === configRequest) applyLoadedConfig(d, { announce }); })
-      .catch(err => { if (request === configRequest) setStatus(err.message); });
+      .catch(err => { if (request === configRequest) setStatus(err.message); })
+      .finally(()=>{if(request===configRequest){configLoading=false;document.getElementById("algorithmChoice").disabled=configSaving||document.getElementById("btnRunSim").disabled;}});
   };
   const startup=++resultLoadRequest;
   fetchConfig().then(()=>fetch("/api/result?metadata=1",{cache:"no-store"})).then(r=>{if(!r.ok)throw Error("저장 결과를 불러오지 못했습니다.");return r.json();})
@@ -573,7 +617,7 @@ if (location.protocol.startsWith("http")) {
     .catch(err=>{if(startup===resultLoadRequest)setStatus(`${err.message} 설정 미리보기를 유지합니다.`);});
   cfgNameSel.onchange = () => {++resultLoadRequest;return fetchConfig(cfgNameSel.value, true);};
   document.getElementById("btnRefreshIni").onclick = () => fetchConfig(cfgNameSel.value, true);
-  window.addEventListener("focus", () => fetchConfig(cfgNameSel.dataset.loaded ? cfgNameSel.value : "", false));
+  window.addEventListener("focus", () => !configSaving&&fetchConfig(cfgNameSel.dataset.loaded ? cfgNameSel.value : "", false));
 }
 
 document.getElementById("btnOpenIni").onclick = async () => {
@@ -591,8 +635,10 @@ document.getElementById("btnOpenIni").onclick = async () => {
 
 let activeJob=null;
 async function runNative(algorithms=null) {
+  if(configSaving||configLoading)return setStatus("설정을 반영하고 있습니다. 잠시 후 실행하세요.");
   if(!location.protocol.startsWith("http"))return setStatus("새 계산은 sim-ui.exe에서 실행하세요.");
   const btn=document.getElementById("btnRunSim"),compare=document.getElementById("btnExperiment"),stop=document.getElementById("btnStopSim");btn.disabled=true;compare.disabled=true;stop.hidden=false;
+  const settingsControls=["cfgName","algorithmChoice","btnSettings","btnOpenIni","btnRefreshIni","showAllConfigs"].map(id=>document.getElementById(id)),settingsStates=settingsControls.map(e=>e.disabled);settingsControls.forEach(e=>e.disabled=true);
   try {
     let response=await fetch(algorithms?"/api/experiments":"/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfgNameSel.value,...(algorithms?{algorithms}:{})})});
     let data=await response.json();if(!response.ok)throw Error(data.error||"실행하지 못했습니다.");
@@ -608,7 +654,7 @@ async function runNative(algorithms=null) {
       const progress=document.getElementById("runProgress");progress.hidden=false;progress.value=p?((job.completedRuns?.length||0)+p.progress)/(job.totalRuns||1):0;
     }
   }catch(error){setStatus(`실행 오류: ${error.message}`);}
-  finally {activeJob=null;btn.disabled=false;compare.disabled=false;stop.hidden=true;document.getElementById("runProgress").hidden=true;}
+  finally {settingsControls.forEach((e,i)=>e.disabled=settingsStates[i]);activeJob=null;btn.disabled=false;compare.disabled=false;stop.hidden=true;document.getElementById("runProgress").hidden=true;}
 }
 document.getElementById("btnRunSim").onclick=()=>runNative();
 document.getElementById("btnStopSim").onclick=async()=>{if(activeJob){await fetch(`/api/run/${activeJob}/cancel`,{method:"POST"});setStatus("계산을 중지하는 중…");}};
@@ -621,10 +667,12 @@ if (location.protocol === "file:") {
     else if(result.bundle)openResultBundle(result.bundle).catch(err=>setStatus(err.message));else installResult(result);
   };
   if(window.SIM_RESULT)saved();else{const script=document.createElement("script");script.src="data/latest_result.js?v=map-load-1";script.onload=saved;script.onerror=()=>setStatus("저장된 결과를 자동으로 읽지 못했습니다. 실행 결과 폴더를 선택하세요.");document.head.append(script);}
+  document.getElementById("algorithmChoice").disabled=true;
+  document.getElementById("showAllConfigs").closest("label").hidden=true;
   cfgNameSel.disabled = true;
   cfgNameSel.hidden = true;
   document.getElementById("savedConfigName").hidden = false;
-  document.getElementById("cfgNameLabel").textContent = "결과의 실행 구성";
+  document.getElementById("cfgNameLabel").textContent = "시험 조건";
   document.getElementById("scenarioHeading").textContent = "실행 결과";
   document.getElementById("btnRefreshIni").hidden = true;
   document.getElementById("runnerActions").hidden = true;

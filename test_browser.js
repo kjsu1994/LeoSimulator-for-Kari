@@ -50,6 +50,7 @@ async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { retu
       await send("Browser.close");return;
     }
     await retry(async()=> assert(await evaluate("typeof resultMeta !== 'undefined' && resultMeta?.replay === true"))).catch(async err=>{console.error('Startup state:',await evaluate("({status:document.getElementById('runStatus')?.textContent,meta:typeof resultMeta,loaded:!!window.SIM_RESULT})"),errors);throw err;});
+    await retry(async()=>assert(await evaluate("typeof openSettings==='function'")));
     assert.equal(await evaluate("document.getElementById('scenarioDetails').open"),false);
     assert.equal(await evaluate("document.getElementById('iniTable').checkVisibility()"),false);
     assert.equal(await evaluate("document.getElementById('scenarioConstellation').textContent"),"132기 · 12개 궤도면");
@@ -62,20 +63,27 @@ async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { retu
     await evaluate("document.querySelector('#scenarioDetails summary').click();iniFilter.value='';iniFilter.oninput()");
     console.log("Scenario UI passed: concise conditions, details collapsed by default, disclosure and search work");
     assert.equal(await evaluate("document.getElementById('cfgName').disabled"),false);
-    assert(await evaluate("document.getElementById('runnerActions').checkVisibility() && document.getElementById('btnOpenIni').checkVisibility()"));
+    assert(await evaluate("document.getElementById('runnerActions').checkVisibility() && !document.getElementById('btnOpenIni').checkVisibility()"));
+    assert.equal(await evaluate("cfgNameSel.selectedOptions[0].textContent"),"기본 통신");
+    assert.equal(await evaluate("scenarioName('PaperS1MyCustom')"),"PaperS1MyCustom");
+    assert.equal(await evaluate("byId('algorithmChoice').value"),"dijkstra-delay");
+    assert(await evaluate("cfgNameSel.options.length<12"));
+    await evaluate("iniFilter.value='송신 간격';iniFilter.oninput()");
+    assert(await evaluate("document.querySelector('#iniTable tbody').children.length>0 && document.querySelector('#iniTable tbody').textContent.includes('sendInterval')"));
+    await evaluate("iniFilter.value='';iniFilter.oninput()");
     await evaluate("simTime=300.5;render()");
     assert.equal(await evaluate("stateAt(simTime).t"),300.5);
     assert.equal(await evaluate("document.getElementById('kpiSat').textContent"),"132 / 264");
     assert.equal(await evaluate("routes.length"),2671);
     assert(await evaluate("document.querySelector('#routeTable tbody').children.length > 0"));
-    await evaluate("cfgNameSel.value='Dijkstra132Hop';cfgNameSel.onchange()");
+    await evaluate("byId('showAllConfigs').checked=true;byId('showAllConfigs').onchange();cfgNameSel.value='Dijkstra132Hop';cfgNameSel.onchange()");
     assert.equal(await evaluate("document.getElementById('scenarioRouting').textContent"),"홉 수 최소");
     assert.equal(await evaluate("routes.length"),2671);
     assert.equal(await evaluate("resultMeta.replay"),true);
     assert(await evaluate("Number(document.getElementById('kpiGsl').textContent) > 0"));
     assert.equal(await evaluate("resultMeta.config.activeConfig"),"Dijkstra132");
     assert.equal(await evaluate("ORBIT_CFG.metric"),"delay");
-    assert(await evaluate("document.getElementById('runStatus').textContent.includes('Dijkstra132Hop')"));
+    assert(await evaluate("document.getElementById('runStatus').textContent.includes('홉 최소')"));
     await evaluate("window.dispatchEvent(new Event('focus'))");
     await new Promise(r=>setTimeout(r,300));
     assert.equal(await evaluate("lastSatStates.length"),132);
@@ -87,6 +95,14 @@ async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { retu
     assert.equal(errors.length,0,JSON.stringify(errors));
     console.log("Chrome passed: engine replay, fractional-time sampling, table rendering, scenario selection preserves recorded map, result reload, external CSV without invented geometry");
 
+    await evaluate("(async()=>{applyLoadedConfig(await fetch('/api/config?config=Dijkstra132').then(r=>r.json()));window.beforeAlgorithmResult=resultMeta;window.beforeAlgorithmConfig=structuredClone(selectedConfig);byId('algorithmChoice').value='mcsr-ts';await byId('algorithmChoice').onchange({target:byId('algorithmChoice')});})()");
+    assert.equal(await evaluate("selectedConfig.algorithm"),"mcsr-ts");
+    assert(await evaluate("resultMeta===beforeAlgorithmResult && selectedConfig.seed===beforeAlgorithmConfig.seed && JSON.stringify(selectedConfig.stations)===JSON.stringify(beforeAlgorithmConfig.stations)"));
+    assert.equal(await evaluate("fetch('/api/config?config=Dijkstra132').then(r=>r.json()).then(c=>c.algorithm)"),"mcsr-ts");
+    await evaluate("(async()=>{window.algorithmFetch=window.fetch;window.fetch=async()=>new Response(JSON.stringify({error:'save rejected'}),{status:400});byId('algorithmChoice').value='mcsr-hr';await byId('algorithmChoice').onchange({target:byId('algorithmChoice')});window.fetch=window.algorithmFetch;})()");
+    assert(await evaluate("byId('algorithmChoice').value==='mcsr-ts' && !byId('algorithmChoice').disabled && runStatus.textContent==='save rejected'"));
+    await evaluate("(async()=>{byId('algorithmChoice').value='dijkstra-delay';await byId('algorithmChoice').onchange({target:byId('algorithmChoice')});})()");
+    console.log('Simple workflow passed: curated conditions, additional configurations, separate algorithm selection, persisted INI, unchanged traffic/result, save-error rollback and Korean INI search');
     await evaluate("(async()=>{openSettings(await fetch('/api/config?config=PaperS1Mcsr').then(r=>r.json()))})()");
     assert.equal(await evaluate("document.querySelectorAll('.sender-check').length"),100);
     assert.equal(await evaluate("value('edit-algorithm')"),"mcsr-ls");
@@ -155,8 +171,8 @@ async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { retu
     await retry(async()=> assert(await evaluate("location.protocol === 'file:' && typeof resultMeta !== 'undefined' && resultMeta?.replay === true")));
     assert.equal(await evaluate("document.getElementById('cfgName').checkVisibility()"),false);
     assert.equal(await evaluate("document.getElementById('runnerActions').checkVisibility()"),false);
-    assert.equal(await evaluate("document.getElementById('savedConfigName').textContent"),"Dijkstra132");
-    assert.equal(await evaluate("document.getElementById('btnOpenIni').checkVisibility()"),true);
+    assert.equal(await evaluate("document.getElementById('savedConfigName').textContent"),"기본 통신");
+    assert.equal(await evaluate("document.getElementById('btnOpenIni').checkVisibility()"),false);
     await evaluate("document.getElementById('btnOpenIni').click()");
     assert(await evaluate("document.getElementById('runStatus').textContent.includes('start_ui.bat')"));
     assert.equal(await evaluate("lastSatStates.length"), 132);

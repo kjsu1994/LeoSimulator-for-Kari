@@ -97,3 +97,7 @@ dialog{color:#e4edf8;background:#151e2c;border:1px solid #40516a;border-radius:1
 
 /* Settings disclosures retain their own full-width layout. */
 .settings-sections{display:block}.settings-sections>.editor-group:last-child{margin-bottom:0}.model-status{margin:0 0 14px;padding:10px 12px;border-left:3px solid #e3b85a;background:#292619;color:#f1d594;font-size:13px}
+
+.cfg-grid>.additional-configs{display:flex;flex-direction:row;align-items:center;gap:7px;font-size:12px;color:#8da2c0}.cfg-grid>.additional-configs input{width:auto;margin:0}.ini-actions{margin-bottom:12px}#algorithmChoice:disabled{opacity:.75}
+
+.ini-label{display:block;color:#d6e5f6;font:500 12px/1.7 system-ui,sans-serif}

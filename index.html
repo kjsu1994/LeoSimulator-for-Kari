@@ -50,32 +50,33 @@
     <aside class="sidebar">
       <div class="card sim-runner">
         <div class="runner-head">
-          <span id="scenarioHeading">시나리오</span>
+          <span id="scenarioHeading">새 시뮬레이션</span>
           <div class="head-btns">
-            <button id="btnSettings" type="button">설정</button>
-            <button id="btnOpenIni" type="button" title="새 실행에 사용할 원본 INI를 편집합니다. 보관된 결과는 바뀌지 않습니다.">INI 파일</button>
-            <button id="btnRefreshIni" type="button" title="설정 새로고침" aria-label="설정 새로고침">🔄</button>
+            <button id="btnSettings" type="button">조건 수정</button>
           </div>
         </div>
         <div class="cfg-grid">
-          <label class="span-2"><span id="cfgNameLabel">실행 구성</span>
+          <label class="span-2"><span id="cfgNameLabel">시험 조건</span>
             <select id="cfgName">
-              <option value="Dijkstra132">Dijkstra132</option>
+              <option value="Dijkstra132">기본 통신</option>
             </select>
             <strong id="savedConfigName" class="saved-config" hidden></strong>
           </label>
+          <label class="span-2 additional-configs"><input id="showAllConfigs" type="checkbox"> 추가 시험 표시</label>
+          <label class="span-2" id="algorithmField"><span>알고리즘</span><select id="algorithmChoice" aria-label="실행 알고리즘"></select></label>
           <dl class="scenario-facts span-2" aria-label="시나리오 정보">
             <div><dt>위성 구성</dt><dd id="scenarioConstellation">—</dd></div>
             <div><dt>고도 · 경사각</dt><dd id="scenarioOrbit">—</dd></div>
             <div><dt>실행 시간</dt><dd id="scenarioDuration">—</dd></div>
-            <div><dt>경로 선택</dt><dd id="scenarioRouting">—</dd></div>
-            <div><dt>전송 주기 · 패킷 크기</dt><dd id="scenarioTraffic">—</dd></div>
+            <div hidden><dt>경로 선택</dt><dd id="scenarioRouting">—</dd></div>
+            <div><dt>송신 간격 · 패킷 크기</dt><dd id="scenarioTraffic">—</dd></div>
             <div><dt>IoT 단말</dt><dd id="scenarioTerminals">—</dd></div>
           </dl>
           <details id="scenarioDetails" class="scenario-details span-2">
-            <summary>상세 설정</summary>
+            <summary>INI 상세</summary>
             <div class="scenario-detail-content">
-              <p class="settings-note">공통 설정과 상속된 설정을 확인할 수 있습니다. 최종 적용 값은 시뮬레이션 엔진에서 결정됩니다.</p>
+<div class="head-btns ini-actions">            <button id="btnOpenIni" type="button" title="새 실행에 사용할 원본 INI를 편집합니다. 보관된 결과는 바뀌지 않습니다.">INI 파일</button>
+            <button id="btnRefreshIni" type="button" title="설정 새로고침" aria-label="설정 새로고침">🔄</button></div>
           <div id="cfgProfile" class="cfg-profile">
             <div id="cfgIniSrc" class="ini-src">연결 확인 중...</div>
             <div id="cfgDesc" class="cfg-desc" hidden></div>
@@ -83,13 +84,13 @@
             <pre id="cfgOwnIni" class="cfg-own"></pre>
           </div>
           <div class="ini-toolbar">
-            <input id="iniFilter" type="text" placeholder="키 / 값 / 섹션 검색 (예: metric, traffic, planeCount)">
+            <input id="iniFilter" type="text" placeholder="항목 검색 (예: 위성 수, 송신 간격)">
             <label class="ini-chk"><input id="chkShowNodes" type="checkbox"> station/terminal 포함</label>
           </div>
           <div class="ini-table-wrap">
             <table id="iniTable">
               <thead>
-                <tr><th>INI Key</th><th>Value</th><th>Section</th></tr>
+                <tr><th>설정 항목 / INI 키</th><th>값</th><th>섹션</th></tr>
               </thead>
               <tbody></tbody>
             </table>
@@ -155,7 +156,7 @@
   <script src="bundle.js?v=20261118-map-load-1"></script>
   <script src="orbit.js?v=20261118-map-load-1"></script>
   <script src="app.js?v=20261118-map-load-1"></script>
-<dialog id="settingsDialog"><form id="settingsForm"><div class="dialog-heading"><h2>시나리오 설정</h2><button type="button" data-close="settingsDialog" aria-label="닫기">×</button></div><div id="settingsFields"></div><p id="settingsError" class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="settingsDialog">취소</button><button type="submit" class="btn-primary">INI에 저장</button></div></form></dialog>
+<dialog id="settingsDialog"><form id="settingsForm"><div class="dialog-heading"><h2>시험 조건</h2><button type="button" data-close="settingsDialog" aria-label="닫기">×</button></div><div id="settingsFields"></div><p id="settingsError" class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="settingsDialog">취소</button><button type="submit" class="btn-primary">INI에 저장</button></div></form></dialog>
 <dialog id="compareDialog"><div class="dialog-heading"><h2>실행 비교</h2><button data-close="compareDialog" aria-label="닫기">×</button></div><div class="compare-controls"><label>기준 실행<select id="baselineRun"></select></label><label>비교 실행<select id="scenarioRun"></select></label><button id="loadComparison" class="btn-primary">비교</button><label class="file-btn">기준 폴더<input id="baselineFolder" type="file" webkitdirectory multiple hidden></label><label class="file-btn">비교 폴더<input id="comparisonFolder" type="file" webkitdirectory multiple hidden></label></div><p id="comparisonStatus" role="status"></p><div id="comparisonContent"></div></dialog>
 <dialog id="experimentDialog"><form id="experimentForm"><div class="dialog-heading"><h2>비교 실행</h2><button type="button" data-close="experimentDialog" aria-label="닫기">×</button></div><div id="experimentAlgorithms" class="editor-grid"></div><p id="experimentConditions" class="quiet" style="padding:0 20px"></p><p id="experimentError" class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="experimentDialog">취소</button><button type="submit" class="btn-primary">실행</button></div></form></dialog>
 <script src="editor.js?v=20261118-map-load-1"></script>
