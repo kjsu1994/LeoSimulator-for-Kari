@@ -122,7 +122,7 @@ class DataTests(unittest.TestCase):
             (root/"engine").mkdir()
             shutil.copy2(Path(server.BASE_DIR,"engine/engine.exe"),root/"engine/engine.exe")
             shutil.copy2(Path(server.BASE_DIR,"replay-model.json"),root/"replay-model.json")
-            with patch.object(server,"BASE_DIR",tmp),patch.object(server,"LEO_DIR",str(root/"settings")),patch.object(server,"INI_PATH",str(root/"settings/simulations/Dijkstra132/omnetpp.ini")):
+            with patch.object(server,"BASE_DIR",tmp),patch.object(server,"LEO_DIR",str(root/"settings")),patch.object(server,"INI_PATH",str(root/"settings/simulations/Network/omnetpp.ini")):
                 result=server.run_simulation("Dijkstra132")
             self.assertEqual(result["bundle"]["manifest"]["engine"]["id"],"leo-native")
             self.assertTrue((root/"data/runs"/result["runId"]/"routes.csv").is_file())

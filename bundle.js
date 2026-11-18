@@ -118,7 +118,7 @@ function readReplayIni(files, entry, selected) {
 }
 async function prepareBundle(bundle) {
   const m=bundle.manifest;
-  if(!m || (!["leo-native-replay-v2","leo-native-replay-v3"].includes(m.format) && (m.format!=="florasat-csv-ini-v1"||m.profile!==REPLAY_MODEL.profile||m.modelHash!==REPLAY_MODEL.modelHash)) || (["leo-native-replay-v2","leo-native-replay-v3"].includes(m.format) && (m.profile!== (m.format==="leo-native-replay-v3"?"leo-native-delta-v3":"leo-native-delta-v2")||m.orbitModelHash!==REPLAY_MODEL.modelHash)))throw new Error("지원하지 않는 실행 결과 또는 원본 모델 버전입니다.");
+  if(!m || (!["leo-native-replay-v2","leo-native-replay-v3","leo-native-replay-v4"].includes(m.format) && (m.format!=="florasat-csv-ini-v1"||m.profile!==REPLAY_MODEL.profile||m.modelHash!==REPLAY_MODEL.modelHash)) || (["leo-native-replay-v2","leo-native-replay-v3","leo-native-replay-v4"].includes(m.format) && (m.profile!== ("leo-native-delta-v"+m.format.slice(-1))||m.orbitModelHash!==REPLAY_MODEL.modelHash)))throw new Error("지원하지 않는 실행 결과 또는 원본 모델 버전입니다.");
   if(!/^[a-zA-Z0-9-]{8,80}$/.test(m.runId)||!m.files||!m.configName||Object.keys(m.overrides||{}).length)throw new Error("Invalid result metadata/overrides");
   const files=new Map(Object.entries(bundle.files||{}));
   for(const [name,expected] of Object.entries(m.files)){
@@ -129,10 +129,10 @@ async function prepareBundle(bundle) {
   }
   if(!Object.hasOwn(m.files,m.entryIni)||!Object.hasOwn(m.files,m.csvPath))throw new Error("Missing required result files");
   const checked=new Map([...files].filter(([name])=>Object.hasOwn(m.files,name)));
-  const native=["leo-native-replay-v2","leo-native-replay-v3"].includes(m.format);
+  const native=["leo-native-replay-v2","leo-native-replay-v3","leo-native-replay-v4"].includes(m.format);
   if(native && (!m.normalizedPath||!Object.hasOwn(m.files,m.normalizedPath)||!Object.hasOwn(m.files,"summary.json")||!Object.hasOwn(m.files,"network-events.jsonl")||!Object.hasOwn(m.files,"timeseries.csv")))throw new Error("계측 결과 파일이 누락되었습니다.");
   const cfg=native?JSON.parse(checked.get(m.normalizedPath)):readReplayIni(checked,m.entryIni,m.configName),rows=parseRoutesCsv(checked.get(m.csvPath));
-  if(native && (![2,3].includes(cfg.normalizedVersion)||!Array.isArray(cfg.stations)||cfg.numTerminals!==0||!Number.isInteger(cfg.numSatellites)||cfg.numSatellites<6||cfg.numSatellites>20000||cfg.planes<2||cfg.numSatellites%cfg.planes||cfg.altitude<220||cfg.altitude>2000||!Number.isFinite(cfg.simTimeLimit)||cfg.simTimeLimit<=0))throw new Error("지원하지 않는 정규화 설정입니다.");
+  if(native && (![2,3,4].includes(cfg.normalizedVersion)||!Array.isArray(cfg.stations)||cfg.numTerminals!==0||!Number.isInteger(cfg.numSatellites)||cfg.numSatellites<6||cfg.numSatellites>20000||cfg.planes<2||cfg.numSatellites%cfg.planes||cfg.altitude<220||cfg.altitude>2000||!Number.isFinite(cfg.simTimeLimit)||cfg.simTimeLimit<=0))throw new Error("지원하지 않는 정규화 설정입니다.");
   const summary=native?JSON.parse(checked.get("summary.json")):null;
   const networkEvents=native?checked.get("network-events.jsonl").split(/\r?\n/).filter(Boolean).map(s=>JSON.parse(s)):[];
   let last=-1;for(const e of networkEvents){if(!Number.isFinite(e.time)||e.time<last||e.time<0||e.time>cfg.simTimeLimit)throw new Error("Invalid network timeline");last=e.time;}

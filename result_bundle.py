@@ -9,7 +9,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-ENTRY = "simulations/Dijkstra132/omnetpp.ini"
+ENTRY = "simulations/Network/omnetpp.ini"
+LEGACY_ENTRY = "simulations/Dijkstra132/omnetpp.ini"
 FORMAT = "florasat-csv-ini-v1"
 PROFILE = "leo-dijkstra-delta-v1"
 
@@ -47,13 +48,14 @@ def ini_dependencies(files, entry=ENTRY):
     return found
 
 
-def make_bundle(inputs, csv_bytes, config_name, model_hash, *, run_id=None, command=None, provenance="captured-before-run"):
-    settings = ini_dependencies(inputs)
+def make_bundle(inputs, csv_bytes, config_name, model_hash, *, run_id=None, command=None, provenance="captured-before-run", entry=None):
+    entry=entry or (ENTRY if ENTRY in inputs else LEGACY_ENTRY)
+    settings = ini_dependencies(inputs,entry)
     files = {"routes.csv": csv_bytes, **{"config/" + name: data for name, data in settings.items()}}
     identifier = run_id or uuid.uuid4().hex
     manifest = {
         "format": FORMAT, "runId": identifier, "createdAt": datetime.now(timezone.utc).isoformat(),
-        "configName": config_name, "runNumber": 0, "entryIni": "config/" + ENTRY,
+        "configName": config_name, "runNumber": 0, "entryIni": "config/" + entry,
         "csvPath": "routes.csv", "profile": PROFILE, "modelHash": model_hash,
         "provenance": provenance, "command": command or [], "overrides": {},
         "files": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()},
@@ -97,18 +99,18 @@ if __name__ == "__main__":
     main()
 
 
-def make_native_bundle(inputs, directory, config_name, model_hash, config, run_id):
-    """Version 2 binds the exact normalized inputs and recorded metrics to replay."""
+def make_native_bundle(inputs, directory, config_name, model_hash, config, run_id, entry=None):
+    """Versioned replay binds the exact normalized inputs and recorded metrics to replay."""
     directory=Path(directory)
-    bundle,files=make_bundle(inputs,(directory/'routes.csv').read_bytes(),config_name,model_hash,run_id=run_id,provenance='native-simulation')
+    bundle,files=make_bundle(inputs,(directory/'routes.csv').read_bytes(),config_name,model_hash,run_id=run_id,provenance='native-simulation',entry=entry)
     config_bytes=json.dumps(config,ensure_ascii=False,allow_nan=False,sort_keys=True).encode('utf-8')
     files['normalized.json']=config_bytes
-    for name in ['summary.json','timeseries.csv','network-events.jsonl','failures.csv','physical-events.json','control-series.csv']:
+    for name in ['summary.json','timeseries.csv','network-events.jsonl','failures.csv','physical-events.json','common-srd.json','control-series.csv']:
         files[name]=(directory/name).read_bytes()
 
     if config.get('scenario'):files['scenario.json']=json.dumps(config['scenario'],ensure_ascii=False,allow_nan=False).encode('utf-8')
-    m=bundle['manifest'];m.update(format='leo-native-replay-v3',profile='leo-native-delta-v3',orbitModelHash=model_hash,
-                                normalizedPath='normalized.json',engine={'id':'leo-native','version':'3.0.0'})
+    m=bundle['manifest'];m.update(format='leo-native-replay-v4',profile='leo-native-delta-v4',orbitModelHash=model_hash,
+                                normalizedPath='normalized.json',engine={'id':'leo-native','version':'4.0.0'})
     if config.get('packetTrace'):
         h=hashlib.sha256()
         with (directory/'events.csv').open('rb') as stream:
@@ -118,7 +120,7 @@ def make_native_bundle(inputs, directory, config_name, model_hash, config, run_i
     m['environmentHash']=fingerprint(config)
     for key,item in config.get('externalInputs',{}).items():
         files['inputs/'+key+('.json' if key=='scenarioFile' else '.csv')]=item['text'].encode('utf-8')
-    m['physicalEventsHash']=config.get('physicalEventsHash');m['metricVersion']=3;m['experimentId']=config.get('experimentId')
+    m['commonSrdHash']=config.get('commonSrdHash');m['physicalEventsHash']=config.get('physicalEventsHash');m['metricVersion']=4;m['experimentId']=config.get('experimentId')
     from native_engine import FIELDS,BOOL_FIELDS,ENUM_FIELDS
     m['algorithmSettings']={key:config.get(key) for key in ['algorithm']+[f[0] for f in FIELDS if '.net.routing.' in f[2]]+list(BOOL_FIELDS)+list(ENUM_FIELDS)}
     m['algorithmSettings'].update({k:config.get(k) for k in ('algorithm','labelCap','reservedPaths','csibEnabled','csibPeriod','csibVote','processingMode','reserveDelay','repairDelay','spfDelay')})

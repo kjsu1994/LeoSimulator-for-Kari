@@ -51,7 +51,7 @@ def main():
     name = "LEO-Network-Simulator-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
     delivery = stage(ROOT / "dist" / name, binaries / "sim-ui.exe")
     import server
-    with patch.object(server, "BASE_DIR", str(delivery)), patch.object(server, "LEO_DIR", str(delivery / "settings")), patch.object(server, "INI_PATH", str(delivery / "settings/simulations/Dijkstra132/omnetpp.ini")):
+    with patch.object(server, "BASE_DIR", str(delivery)), patch.object(server, "LEO_DIR", str(delivery / "settings")), patch.object(server, "INI_PATH", str(delivery / "settings" / server.ENTRY)):
         server.run_simulation("Dijkstra132")
     archive = shutil.make_archive(str(delivery), "zip", delivery.parent, delivery.name)
     print("DELIVERY:", delivery)

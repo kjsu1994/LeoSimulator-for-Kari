@@ -143,6 +143,8 @@ def prepare(base,cfg,cancel=None):
                     except subprocess.TimeoutExpired:process.kill();process.wait(timeout=1)
         if process.returncode:raise ValueError((folder/'prepare.log').read_text(encoding='utf-8',errors='replace')[-4000:])
         events=json.loads((folder/'physical-events.json').read_text())
+        cfg['commonSrd']=json.loads((folder/'common-srd.json').read_text())
+        cfg['commonSrdHash']=hashlib.sha256(json.dumps(cfg['commonSrd'],sort_keys=True,separators=(',',':')).encode()).hexdigest()
     if hashlib.sha256((Path(base)/'engine/engine.exe').read_bytes()).hexdigest()!=kernel:raise ValueError('Engine changed during preparation')
     cfg['physicalEvents']=events;cfg['physicalPrepared']=True
     cfg['physicalEventsHash']=hashlib.sha256(json.dumps(events,sort_keys=True,separators=(',',':')).encode()).hexdigest()
@@ -179,7 +181,7 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
     summary=json.loads((folder/'summary.json').read_text());summary['elapsedSeconds']=time.monotonic()-start;summary['peakMemoryBytes']=peak
     (folder/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,allow_nan=False,indent=2),encoding='utf-8')
     profile=json.loads((base/'replay-model.json').read_text(encoding='utf-8'))
-    bundle,payload=make_native_bundle(inputs,folder,config_name,profile['modelHash'],cfg,run_id)
+    bundle,payload=make_native_bundle(inputs,folder,config_name,profile['modelHash'],cfg,run_id,entry=Path(ini).relative_to(settings).as_posix())
     build=base/'engine/build-info.json'
     if build.exists():
         info=json.loads(build.read_text());
@@ -210,6 +212,7 @@ def start(base,settings,ini,name,read_config,variables=None,algorithms=None):
             folder=Path(base)/'data/experiments'/run_id;folder.mkdir(parents=True,exist_ok=False)
             (folder/'common.json').write_text(json.dumps(common,ensure_ascii=False,allow_nan=False,indent=2),encoding='utf-8')
             (folder/'physical-events.json').write_text(json.dumps(common['physicalEvents'],indent=2),encoding='utf-8')
+            if common.get('commonSrd'):(folder/'common-srd.json').write_text(json.dumps(common['commonSrd'],indent=2),encoding='utf-8')
             job['phase']='running';selected=algorithms or [common['algorithm']];job['totalRuns']=len(selected)
             for algorithm in selected:
                 if event.is_set():raise InterruptedError('실행을 중지했습니다.')
@@ -217,7 +220,7 @@ def start(base,settings,ini,name,read_config,variables=None,algorithms=None):
                 child_id=new_id() if algorithms is not None else run_id;job['currentRunId']=child_id
                 result=execute(base,settings,ini,name,read_config,child_id,event,variables,(child,inputs))
                 job['completedRuns'].append({'runId':child_id,'algorithm':algorithm})
-            manifest={'experimentId':run_id,'physicalEventsHash':common['physicalEventsHash'],'runs':job['completedRuns']}
+            manifest={'experimentId':run_id,'physicalEventsHash':common['physicalEventsHash'],'commonSrdHash':common.get('commonSrdHash'),'runs':job['completedRuns']}
             (folder/'manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
             job['status']='completed';job['result']=manifest if algorithms is not None else result
         except InterruptedError as e:job.update(status='cancelled',error=str(e))

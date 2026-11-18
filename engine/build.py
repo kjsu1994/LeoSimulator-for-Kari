@@ -11,9 +11,12 @@ with tempfile.TemporaryDirectory(prefix="leo-build-") as tmp:
     subprocess.run(["wsl","-d","Ubuntu","-e","bash","-c",f"cd {linux} && x86_64-w64-mingw32-g++ -std=gnu++17 -O2 -static test_algorithms.cpp -o test_algorithms.exe"],check=True,cwd="C:/")
     subprocess.run([str(Path(tmp)/"test_algorithms.exe")],check=True)
 
+    subprocess.run(["wsl","-d","Ubuntu","-e","bash","-c",f"cd {linux} && x86_64-w64-mingw32-g++ -std=gnu++17 -O2 -static test_control.cpp -o test_control.exe"],check=True,cwd="C:/")
+    subprocess.run([str(Path(tmp)/"test_control.exe")],check=True)
+
     for source in ([] if '--engine-only' in sys.argv else sorted((root/'tests/reference').glob('*.cpp'))):
         name=source.stem
         command=f"cd {linux} && x86_64-w64-mingw32-g++ -std=gnu++17 -O2 -static -Itests/include -Ivendor/routing tests/reference/{source.name} -o {name}.exe"
         subprocess.run(['wsl','-d','Ubuntu','-e','bash','-c',command],check=True,cwd='C:/')
         subprocess.run([str(Path(tmp)/(name+'.exe'))],check=True)
-(root/'build-info.json').write_text(json.dumps({'version':'3.0.0','compiler':'x86_64-w64-mingw32-g++ 13-win32','sources':source_hashes,'sha256':hashlib.sha256((root/'engine.exe').read_bytes()).hexdigest()},indent=2),encoding='utf-8')
+(root/'build-info.json').write_text(json.dumps({'version':'4.0.0','compiler':'x86_64-w64-mingw32-g++ 13-win32','sources':source_hashes,'sha256':hashlib.sha256((root/'engine.exe').read_bytes()).hexdigest()},indent=2),encoding='utf-8')

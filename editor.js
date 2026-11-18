@@ -24,7 +24,7 @@ function openSettings(cfg){
   for(const f of cfg.capabilities.fields.filter(f=>basicKeys.includes(f.key)))addField(grid,f);
   const [models,mg]=group("실험 모델",true);container.append(models);
   for(const [key,label,choices]of [["processingMode","처리 지연",{neutral:"추가 지연 없음",assumed:"가정값 적용"}],["controlMode","제어 통신",{packet:"실제 패킷",time:"시간 가정"}],["jitterModel","지터",{packet:"실제 지연 변동",cost:"라우팅 비용 주입"}],["islMode","ISL 연결",{fixed:"고정 격자",scheduled:"계획된 개폐"}]])mg.append(control(label,"edit-"+key,cfg[key]||Object.keys(choices)[0],"select",choices));
-  for(const [key,label]of [["controlRefresh","제어 갱신 (s)"],["controlTimeout","수집 제한 시간 (s)"],["controlHeaderBytes","제어 헤더 (B)"],["controlRecordBytes","상태 레코드 (B)"]])mg.append(control(label,"edit-"+key,cfg[key],"number",{min:key.endsWith("Bytes")?1:1e-11,step:key.endsWith("Bytes")?1:"any"}));
+  for(const [key,label]of [["controlRefresh","제어 갱신 (s)"],["controlTimeout","수집 제한 시간 (s)"],["controlHeaderBytes","제어 헤더 (B)"],["controlRecordBytes","상태 레코드 (B)"],["controlMtu","제어 MTU (B)"],["controlReassemblyTimeout","재조립 제한 (s)"],["controlResyncInterval","재동기화 주기 (s)"]])mg.append(control(label,"edit-"+key,cfg[key],"number",{min:key==="controlMtu"?64:key.endsWith("Bytes")?1:1e-11,step:key.endsWith("Bytes")||key==="controlMtu"?1:"any"}));
   const scheduleLabel=node("label",{class:"file-btn"},"ISL 개폐 일정 가져오기"),scheduleFile=node("input",{type:"file",accept:".csv",hidden:true});scheduleLabel.append(scheduleFile);mg.append(scheduleLabel);
   scheduleFile.onchange=async()=>{try{nativeUI.scenario.scheduled_events=readEventCsv(await scheduleFile.files[0].text());byId("edit-islMode").value="scheduled";scheduleLabel.firstChild.textContent=`ISL 일정 ${nativeUI.scenario.scheduled_events.length}개`;byId("settingsError").textContent="";}catch(e){byId("settingsError").textContent=e.message;}};
   if(cfg.islScheduleFile)mg.append(control("기존 일정 경로","edit-islScheduleFile",cfg.islScheduleFile,"text"));
@@ -143,7 +143,7 @@ byId("settingsForm").onsubmit=async event=>{
     for(const key of ["congestionMode","failureSchedule","failureKnowledge","congestionZones","routeRecording","failureReplay"]){const input=byId("edit-"+key);if(input)changes[key]=input.value;}
     for(const key of ["randomFailures","randomStart","randomEnd","randomDuration","failureSeed","congestionRefresh","congestionBuffer","congestionPacketBytes"])changes[key]=numeric("edit-"+key);
     for(const key of ["processingMode","controlMode","jitterModel","islMode","islScheduleFile"]){const e=byId("edit-"+key);if(e)changes[key]=e.value;}
-    for(const key of ["controlRefresh","controlTimeout","controlHeaderBytes","controlRecordBytes"])changes[key]=numeric("edit-"+key);
+    for(const key of ["controlRefresh","controlTimeout","controlHeaderBytes","controlRecordBytes","controlMtu","controlReassemblyTimeout","controlResyncInterval"])changes[key]=numeric("edit-"+key);
     changes.packetTrace=byId("edit-packetTrace").checked;
     const response=await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfg.activeConfig,changes,scenario:nativeUI.scenario})});const result=await response.json();if(!response.ok)throw Error(result.error||"저장하지 못했습니다.");
     applyLoadedConfig(result,{announce:true});byId("settingsDialog").close();setStatus("INI에 저장했습니다. 실행하면 새 설정이 적용됩니다.");
@@ -184,7 +184,7 @@ window.addEventListener("sim-result",e=>showMetrics(e.detail));window.addEventLi
 const comparisonInputs={};
 function showComparison(a,b){
   const sa=offered(a.summary),sb=offered(b.summary);const ca=a.config,cb=b.config;
-  const verified=a.manifest.format==="leo-native-replay-v3"&&b.manifest.format==="leo-native-replay-v3"&&sa.processingMode==="neutral"&&sb.processingMode==="neutral"&&sa.controlMode===sb.controlMode&&sa.jitterModel===sb.jitterModel&&a.manifest.physicalEventsHash===b.manifest.physicalEventsHash;
+  const verified=a.manifest.format==="leo-native-replay-v4"&&b.manifest.format==="leo-native-replay-v4"&&sa.processingMode==="neutral"&&sb.processingMode==="neutral"&&sa.controlMode===sb.controlMode&&sa.jitterModel===sb.jitterModel&&a.manifest.physicalEventsHash===b.manifest.physicalEventsHash;
   const sameTraffic=sa.trafficHash===sb.trafficHash,ha=a.manifest.environmentHash,hb=b.manifest.environmentHash;
   byId("comparisonStatus").textContent=(verified&&ha&&ha===hb&&sameTraffic)?"동일한 환경·송신 조건입니다.":sameTraffic?"송신 조건은 동일합니다. 환경 설정 차이를 확인하세요.":"송신 조건이 다릅니다.";
   const content=byId("comparisonContent");content.replaceChildren();const table=node("table"),head=table.createTHead().insertRow();for(const t of ["지표",`${sa.algorithm} (기준)`,`${sb.algorithm} (비교)`,"차이"])head.append(node("th",{},t));
@@ -218,9 +218,10 @@ if(typeof resultMeta!=="undefined"&&resultMeta)showMetrics(resultMeta);
 function readEventCsv(text){const rows=text.replace(/^\uFEFF/,"").trim().split(/\r?\n/);if(rows.shift()!=="time,event,satA,satB")throw Error("CSV 열: time,event,satA,satB");return rows.map(row=>{const[t,event,a,b]=row.split(",");return{time:Number(t),event:({fail:"failure",down:"failure",up:"restore"})[event]||event,a:Number(a),b:Number(b)};});}
 function offered(s){if((s.metricVersion||0)>=3||!Number.isFinite(s.attempted))return s;return{...s,deliveryRate:s.attempted?100*s.received/s.attempted:0,dropped:s.dropped+(s.noUplink??s.attempted-s.sent)};}
 function showResearchMetrics(s){
-  let detail=byId("researchMetrics");if(detail)detail.remove();if(s.metricVersion!==3)return;
+  let detail=byId("researchMetrics");if(detail)detail.remove();if((s.metricVersion||0)<3)return;
   detail=node("details",{id:"researchMetrics"});detail.append(node("summary",{},"제어 통신·연산·복구"));
   const grid=node("div",{class:"metric-grid"});for(const [name,v]of Object.entries({"제어 프레임":s.control?.hopAccepted,"제어 전송 (MB)":s.control?.wireBytes/1e6,"제어 폐기":s.control?.dropped,"간선 검사":s.operations?.edgeChecks,"라벨 확장":s.operations?.labelExpand,"재계산":s.replanned})){const e=node("div");e.append(node("small",{},name),node("strong",{},metricText(v)));grid.append(e);}detail.append(grid);
+  if(s.control?.byKind){const table=node("table"),head=table.createTHead().insertRow();for(const text of ["메시지","생성","홉 전달","홉 실패","전송 프레임","손실 프레임","전송 MB"])head.append(node("th",{},text));const body=table.createTBody();for(const [kind,m]of Object.entries(s.control.byKind)){const row=body.insertRow();for(const v of [kind,m.generated||0,m.messageHopArrivals||0,(m.messageHopDrops||0)+(m.routeDrops||0),m.frameAttempts||0,m.frameDrops||0,(m.wireBytes||0)/1e6])row.insertCell().textContent=typeof v==="number"?metricText(v):v;}detail.append(table);}
   for(const [name,time]of Object.entries(s.computeMs||{}))detail.append(node("p",{class:"quiet"},`${name}: ${metricText(time)} ms`));
   for(const event of s.recovery||[]){detail.append(node("p",{},`${event.time}s · ${event.a}–${event.b} · ${event.restore?"재연결":"단절"}`));detail.append(node("p",{class:"quiet"},`감지 ${event.detectedSeconds==null?"미감지":metricText(event.detectedSeconds)+"s"} · 정보 수렴 ${event.convergenceSeconds==null?"미수렴":metricText(event.convergenceSeconds)+"s"} (${event.appliedNodes}/${event.expectedNodes})`));for(const f of event.flows)detail.append(node("p",{class:"quiet"},`${f.source}→${f.destination}: ${!f.affected?"영향 경로 없음":f.recoverySeconds==null?"관측 종료 · 미복구":metricText(f.recoverySeconds)+"s"}`));}
   byId("nativeMetrics").append(detail);

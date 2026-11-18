@@ -107,7 +107,7 @@ class JobV2Tests(unittest.TestCase):
         from comparison import compare_bundles
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);settings=base/'settings';shutil.copytree(server.LEO_DIR,settings)
-            ini=settings/'simulations/Dijkstra132/omnetpp.ini'
+            ini=settings/'simulations/Network/omnetpp.ini'
             (base/'engine').mkdir();shutil.copy2(Path(server.BASE_DIR)/'engine/engine.exe',base/'engine/engine.exe');shutil.copy2(Path(server.BASE_DIR)/'replay-model.json',base/'replay-model.json')
             reader=lambda name,variables=None:server.read_ini_config(name,entry_path=str(ini),variables=variables)
             edit(ini,'Dijkstra132',{'simTimeLimit':2,'startTime':0},reader)
@@ -118,8 +118,8 @@ class JobV2Tests(unittest.TestCase):
             while run_manager.state(identifier)['status'] in ('queued','running'):
                 self.assertLess(time.monotonic(),deadline);time.sleep(.05)
             state=run_manager.state(identifier);self.assertEqual(state['status'],'completed',state.get('error'))
-            bundle=state['result']['bundle'];self.assertEqual(bundle['manifest']['format'],'leo-native-replay-v3')
-            self.assertEqual(bundle['files']['config/simulations/Dijkstra132/omnetpp.ini'].encode(),before)
+            bundle=state['result']['bundle'];self.assertEqual(bundle['manifest']['format'],'leo-native-replay-v4')
+            self.assertEqual(bundle['files']['config/simulations/Network/omnetpp.ini'].encode(),before)
             for name,digest in bundle['manifest']['files'].items():self.assertEqual(hashlib.sha256(bundle['files'][name].encode()).hexdigest(),digest)
             self.assertTrue(compare_bundles(bundle,bundle)['comparable'])
             pointer=(base/'data/latest.json').read_bytes();edit(ini,'Dijkstra132',{'simTimeLimit':1000000,'sendInterval':.00001},reader)

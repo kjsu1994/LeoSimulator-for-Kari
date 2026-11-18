@@ -198,12 +198,13 @@ def configuration(cfg):
         c[key]=string('LeoDijkstra.native.'+key,default)
     for key,choices in {'processingMode':('neutral','assumed'),'controlMode':('packet','time'),'jitterModel':('packet','cost'),'islMode':('fixed','scheduled')}.items():
         if c[key] not in choices:raise ValueError('Unknown '+key)
-    for key,default in [('controlRefresh',5),('controlTimeout',3),('controlHeaderBytes',32),('controlRecordBytes',48)]:
+    for key,default in [('controlRefresh',5),('controlTimeout',3),('controlHeaderBytes',32),('controlRecordBytes',48),('controlMtu',1500),('controlReassemblyTimeout',3),('controlResyncInterval',30)]:
         c[key]=num('LeoDijkstra.native.'+key,default)
         if c[key]<(1 if key.endswith('Bytes') else TICK) or c[key]>1000000 or (key.endswith('Bytes') and int(c[key])!=c[key]):raise ValueError('Invalid '+key)
+    if not 64<=c['controlMtu']<=65535 or int(c['controlMtu'])!=c['controlMtu']:raise ValueError('Invalid control MTU')
     c['islScheduleFile']=string('LeoDijkstra.native.islScheduleFile','')
     c['failureRouteSrc']=int(num('LeoDijkstra.mapDataSource.failureRouteSrc',-1));c['failureRouteDst']=int(num('LeoDijkstra.mapDataSource.failureRouteDst',-1))
-    c['modelVersion']='leo-research-3';c['metricVersion']=3
-    c['variables']=variables;c['capabilities']=capabilities();c['normalizedVersion']=3
+    c['modelVersion']='leo-research-4';c['metricVersion']=4;c['controlProtocolVersion']=2
+    c['variables']=variables;c['capabilities']=capabilities();c['normalizedVersion']=4
     c['sweeps']={name:[number(x) for x in values.split(',')] for entry in entries for name,values in re.findall(r'\$\{(\w+)=([^}]+)\}',entry['v'])}
     return c

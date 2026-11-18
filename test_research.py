@@ -75,13 +75,79 @@ class ResearchTests(unittest.TestCase):
         c=self.config();c['islMode']='scheduled';c['scenario']={'entries':[],'scheduled_events':[{'time':.1,'event':'failure','a':0,'b':8}]}
         with self.assertRaises(ValueError):run_manager.load_external_inputs(c,server.INI_PATH)
 
+    def test_v4_dirty_flags_quiet_and_explicit_resync(self):
+        c=self.config();c.update(algorithm='mcsr-ls',csibEnabled=True,csibPeriod=100,csibMonitorInterval=0,controlTimeout=.2,simTimeLimit=3,controlRefresh=.37,failureSchedule='0-1@0.3+0.7',slsInterval=.1,slsMissCount=2,controlResyncInterval=30)
+        for station in c['stations']:station['enabled']=False
+        short,_=self.engine(c);c['simTimeLimit']=8;long,_=self.engine(c)
+        self.assertEqual(short['control']['generatedByKind']['report'],long['control']['generatedByKind']['report'])
+        c['controlResyncInterval']=2;resync,_=self.engine(c)
+        self.assertGreater(resync['control']['generatedByKind']['report'],long['control']['generatedByKind']['report'])
+
+    def test_v4_common_srd_and_failure_targets(self):
+        c=server.read_ini_config('Mcsr132');c.update(simTimeLimit=2,controlMode='time',srdK=2,srdL=1,congestionMode='environment')
+        for station in c['stations']:station['enabled']=False
+        c['scenario']={'entries':[{'target':{'kind':'zone','params':{'zone_kind':'srd','srd_from':0,'srd_to':0}},'start_s':.5,'end_s':1.5,'fail':True}]}
+        _,prepared=self.engine(c,True);common=json.loads(prepared['common-srd.json'])
+        self.assertEqual((common['K'],common['L']),(2,1))
+        targets=json.loads(prepared['physical-events.json']);self.assertEqual(sum(e['event']=='failure' for e in targets),7)
+        for algorithm in ('dijkstra-delay','mcsr-ls','mcsr-hr'):
+            run=copy.deepcopy(c);run.update(algorithm=algorithm,commonSrd=common)
+            _,files=self.engine(run);self.assertEqual(json.loads(files['physical-events.json']),targets)
+            self.assertEqual(json.loads(files['common-srd.json']),common)
+        c['scenario']['entries'][0].pop('fail');c['scenario']['entries'][0]['penalty']={'delay_ms':2}
+        _,files=self.engine(c);events=[json.loads(row) for row in files['network-events.jsonl'].splitlines()]
+        actual={(e['a'],e['b']) for e in events if e['event']=='congestion' and e['delay']>0}
+        expected={tuple(link) for links in common['targets'].values() for link in links}
+        self.assertEqual(actual,expected)
+
+    def test_v4_fragment_boundaries_and_reassembly(self):
+        c=self.config();c.update(algorithm='mcsr-ls',csibEnabled=True,csibPeriod=.5,controlTimeout=.2,simTimeLimit=2,controlMtu=128,packetTrace=True)
+        for station in c['stations']:station['enabled']=False
+        result,files=self.engine(c);events=[json.loads(row) for row in files['network-events.jsonl'].splitlines()]
+        frames=[e for e in events if e['event']=='control-frame'];messages=[e for e in events if e['event']=='control-message']
+        self.assertTrue(frames);self.assertTrue(messages);self.assertTrue(all(e['bytes']<=128 for e in frames))
+        self.assertTrue(any(e['fragments']>1 for e in messages))
+        self.assertEqual(result['control']['wireBytes'],sum(row.get('wireBytes',0) for row in result['control']['byKind'].values()))
+        c['queueCapacity']=1;c['islDatarate']=10000
+        result,_=self.engine(c);self.assertGreater(result['control']['dropped'],0)
+        self.assertGreater(sum(row.get('messageHopDrops',0) for row in result['control']['byKind'].values()),0)
+
+    def test_v4_frame_header_and_mtu_boundary(self):
+        c=self.config();c.update(simTimeLimit=.3,packetTrace=True)
+        for station in c['stations']:station['enabled']=False
+        for mtu,expected in ((64,{64,48}),(72,{72}),(73,{72})):
+            c['controlMtu']=mtu;_,files=self.engine(c)
+            frames=[json.loads(line) for line in files['network-events.jsonl'].splitlines()]
+            self.assertEqual({e['bytes'] for e in frames if e['event']=='control-frame' and e['kind']=='hello'},expected)
+
+    def test_v4_partial_message_timeout_and_loss(self):
+        c=self.config();c.update(algorithm='mcsr-ls',csibEnabled=True,csibPeriod=.5,controlTimeout=.2,simTimeLimit=2,controlMtu=128,controlReassemblyTimeout=.000001)
+        for station in c['stations']:station['enabled']=False
+        result,_=self.engine(c)
+        self.assertGreater(sum(row.get('reassemblyTimeouts',0) for row in result['control']['byKind'].values()),0)
+
+    def test_v4_partial_transmission_counts_bytes_at_end(self):
+        c=self.config();c.update(simTimeLimit=.3,islDatarate=100)
+        for station in c['stations']:station['enabled']=False
+        result,_=self.engine(c);control=result['control']
+        self.assertGreater(control['inFlight'],0);self.assertEqual(control['arrived'],0)
+        self.assertGreater(control['wireBytes'],0);self.assertGreater(control['busySeconds'],0)
+        self.assertEqual(control['wireBytes'],sum(row.get('wireBytes',0) for row in control['byKind'].values()))
+
+    def test_v4_control_settings_reject_invalid_mtu(self):
+        from native_engine import configuration
+        c=server.read_ini_config('Dijkstra132')
+        for value in ('40','1500.5','65536'):
+            candidate=copy.deepcopy(c);candidate['effectiveEntries'].append({'k':'*.native.controlMtu','v':value,'sec':'probe'})
+            with self.assertRaises(ValueError):configuration(candidate)
+
 
 class ExperimentTests(unittest.TestCase):
     def test_group_freezes_common_events_and_preserves_result_on_cancel(self):
         import shutil,time
         from comparison import compare_bundles
         with tempfile.TemporaryDirectory() as tmp:
-            base=Path(tmp);settings=base/'settings';ini=settings/'simulations/Dijkstra132/omnetpp.ini';ini.parent.mkdir(parents=True)
+            base=Path(tmp);settings=base/'settings';ini=settings/'simulations/Network/omnetpp.ini';ini.parent.mkdir(parents=True)
             ini.write_text('[General]\n*.numSatellites=12\n*.**.planeCount=4\n**.nrOfGS=2\n*.topologyControl.minimumElevation=-90\n[Config A]\nsim-time-limit=1s\n*.station[0].traffic.enabled=true\n*.station[0].traffic.dstStation=1\n*.station[0].traffic.startTime=0s\n*.islFailures.schedule="0-1@0.2+0.3"\n')
             (base/'engine').mkdir();shutil.copy2(Path(server.BASE_DIR)/'engine/engine.exe',base/'engine/engine.exe');shutil.copy2(Path(server.BASE_DIR)/'replay-model.json',base/'replay-model.json')
             reader=lambda name,variables=None:server.read_ini_config(name,entry_path=str(ini),variables=variables)

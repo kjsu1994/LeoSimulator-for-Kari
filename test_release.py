@@ -15,7 +15,7 @@ class ReleaseTests(unittest.TestCase):
                          "licenses/Microsoft-WebView2-1.0.3856.49.txt", "engine/main.cpp",
                          "engine/algorithms.h", "engine/vendor/json.hpp", "server.py", "sim-ui.spec"):
                 self.assertTrue((package / file).is_file(), file)
-            ini = "settings/simulations/Dijkstra132/omnetpp.ini"
+            ini = "settings/simulations/Network/omnetpp.ini"
             self.assertEqual((package / ini).read_bytes(), (build_release.ROOT / ini).read_bytes())
             self.assertFalse((package / ".git").exists())
             self.assertFalse((package / "build").exists())

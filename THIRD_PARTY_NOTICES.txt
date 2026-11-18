@@ -108,3 +108,5 @@ Research adapter revision 3: shared frozen physical inputs, offered-load metrics
 explicit experimental packet control protocol, packet delay variation, counters
 and v3 replay are local modifications. The supplied MCSR core headers remain
 unchanged. The new control wire model is not a claim of paper/protocol equivalence.
+
+Research adapter revision 4: explicit control unicast, frame segmentation/reassembly, independent resynchronization and frozen common SRD targets. Original routing cores remain unchanged.

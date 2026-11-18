@@ -20,7 +20,8 @@ NO_WIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 LEO_DIR = os.path.join(BASE_DIR, "settings")
-INI_PATH = os.path.join(LEO_DIR, "simulations", "Dijkstra132", "omnetpp.ini")
+from result_bundle import ENTRY
+INI_PATH = os.path.join(LEO_DIR, *ENTRY.split("/"))
 
 
 def _strip_comment(raw):

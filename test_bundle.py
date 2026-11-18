@@ -10,7 +10,7 @@ from result_bundle import ini_dependencies, make_bundle, write_bundle, ENTRY
 class BundleTests(unittest.TestCase):
     def test_recursive_ini_preserves_bytes_and_relative_tree(self):
         entry=b'[General]\ninclude stations/nodes.ini\ninclude ../shared.ini\n'
-        files={ENTRY:entry,'simulations/Dijkstra132/stations/nodes.ini':b'# stations\r\n','simulations/shared.ini':b'# shared\n'}
+        files={ENTRY:entry,'simulations/Network/stations/nodes.ini':b'# stations\r\n','simulations/shared.ini':b'# shared\n'}
         bundle,payload=make_bundle(files,b'csv','Dijkstra132','model',run_id='test-run-id')
         with tempfile.TemporaryDirectory() as tmp:
             write_bundle(tmp,bundle,payload)

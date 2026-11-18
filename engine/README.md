@@ -14,7 +14,7 @@ Windows 실행 파일 engine.exe는 OMNeT++/INET/WSL/Docker 없이 실행됩니�
 4. 패킷 보존·장애·동일 송신 입력 검사와 verify_workloads.py를 수행합니다.
 
 Dijkstra는 algorithms.h, MCSR은 vendor/routing/mcsr의 원본 Planner/Router/
-Resilience/CSIB를 사용합니다. 어댑터와 실행 기반만 main.cpp에 구현합니다.
+Resilience/CSIB를 사용합니다. 어댑터와 실행 기반은 main.cpp와 control.h에 구현합니다.
 원본 헤더 변경 여부는 vendor/routing-origin.json으로 확인할 수 있습니다.
 
 기본은 기존 metric="delay" 또는 "hop"이며 INI 형식과 키를 유지합니다.
@@ -36,7 +36,8 @@ algorithms.h는 Sat_Net_DijkstraRouting::computeTree의 지연/홉 가중치와 
 LoRa 무선 물리계층, 충돌, IoT, 에너지, TLE와 다른 FLoRaSat 모델은 제외합니다.
 
 요약 통계는 summary.json, 진단은 events.csv에 저장됩니다. 패킷 보존 관계는
-sent = received + dropped + inFlight입니다. noUplink는 송신 전 실패한 시도입니다.
+attempted = received + dropped + inFlight입니다. sent는 접속·초기 경로 선택에 성공한 시도이며,
+sent = received + admittedDropped + inFlight입니다. noUplink는 송신 전 실패한 시도입니다.
 계획 경로는 routes.csv에 기록하며 수신 성공 기록과 구분합니다.
 
 ## 라이선스
@@ -52,7 +53,7 @@ summary의 수신 지연은 큐·직렬화·전파·복구 처리 지연을 포�
 지터는 흐름별 RFC 방식의 도착 간격 변동 추정값이며, 라우팅 비용 지터와 구별합니다.
 시계는 10^-11초 정수이며 송신·장애·환경 손실 난수를 분리합니다.
 
-## v3 실행 기반
+## 실행 기반
 
 control.h의 실험 제어 프로토콜은 실제 Packet으로 동일 FIFO를 사용합니다.
 Context.graph(viewer)는 실제 전달된 광고만 반영하며 궤도 기반 전파 거리만 공통으로 예측합니다.

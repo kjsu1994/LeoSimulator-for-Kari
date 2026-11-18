@@ -16,7 +16,7 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
   const referenceResult={ok:true,runId:referenceManifest.runId,bundle:{manifest:referenceManifest,files:referenceFiles}};
   const referenceFolder=path.join(httpRoot,"data/runs",referenceManifest.runId);fs.mkdirSync(referenceFolder,{recursive:true});
   fs.writeFileSync(path.join(referenceFolder,"result.json"),JSON.stringify(referenceResult));fs.writeFileSync(path.join(httpRoot,"data/latest.json"),JSON.stringify({runId:referenceManifest.runId}));fs.writeFileSync(path.join(httpRoot,"data/latest_result.js"),"window.SIM_RESULT="+JSON.stringify(referenceResult)+";");
-  const server = spawn("python", ["-c", `import server,http.server,sys,os;server.BASE_DIR=sys.argv[1];server.LEO_DIR=os.path.join(server.BASE_DIR,'settings');server.INI_PATH=os.path.join(server.LEO_DIR,'simulations/Dijkstra132/omnetpp.ini');http.server.ThreadingHTTPServer(('127.0.0.1',${port}),server.SimHandler).serve_forever()`,httpRoot], {cwd: __dirname, windowsHide:true, stdio:"ignore"});
+  const server = spawn("python", ["-c", `import server,http.server,sys,os;server.BASE_DIR=sys.argv[1];server.LEO_DIR=os.path.join(server.BASE_DIR,'settings');server.INI_PATH=os.path.join(server.LEO_DIR,'simulations/Network/omnetpp.ini');http.server.ThreadingHTTPServer(('127.0.0.1',${port}),server.SimHandler).serve_forever()`,httpRoot], {cwd: __dirname, windowsHide:true, stdio:"ignore"});
   const browser = spawn("C:/Program Files/Google/Chrome/Application/chrome.exe", ["--headless=new", "--disable-extensions", "--disable-background-networking", "--no-first-run", `--remote-debugging-port=${port+1}`, `--user-data-dir=${profile}`, "about:blank"], {windowsHide:true, stdio:"ignore"});
   let ws;
   try {
@@ -92,7 +92,7 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     await evaluate(`openResultBundle(${JSON.stringify(nativeResult.bundle)})`);
     assert(await evaluate("!byId('nativeMetrics').hidden && byId('metricValues').children.length===8 && resultMeta.summary.received>0"));
 
-    assert(await evaluate("resultMeta.summary.metricVersion===3 && !!byId('researchMetrics')"));
+    assert(await evaluate("resultMeta.summary.metricVersion===4 && !!byId('researchMetrics')"));
     await evaluate("byId('metricSeries').value='controlBytes';drawMetrics()");
     const nativeJson=JSON.stringify(nativeResult);
     await evaluate(`window.batchResult=${nativeJson};window.batchFetch=window.fetch;window.batchBody=null;window.fetch=async(url,options)=>{if(url==='/api/experiments'){window.batchBody=JSON.parse(options.body);return new Response(JSON.stringify({runId:'browser-experiment'}),{status:202});}if(url==='/api/run/browser-experiment')return new Response(JSON.stringify({status:'completed',completedRuns:[{runId:batchResult.runId},{runId:batchResult.runId}],result:{runs:[]}}));if(String(url).startsWith('/api/result?runId='))return new Response(JSON.stringify(batchResult));return batchFetch(url,options);};byId('btnExperiment').click();`);
@@ -108,7 +108,7 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     await evaluate("(async()=>{await openResultBundle((await fetch('/api/result').then(r=>r.json())).bundle)})()");
     assert(await evaluate("byId('nativeMetrics').hidden === !resultMeta.summary"));
     assert.equal(errors.length,0,JSON.stringify(errors));
-    console.log('Native UI passed: 100-node settings, rate/interval coupling, region editor, responsive dialog, MCSR controls, v3 replay, offered-load metrics, control chart, experiment runner and comparison');
+    console.log('Native UI passed: 100-node settings, rate/interval coupling, region editor, responsive dialog, MCSR controls, v4 replay, offered-load metrics, control chart, experiment runner and comparison');
 
     const offline = path.join(profile, "offline");
     fs.mkdirSync(path.join(offline, "data"), {recursive:true});
