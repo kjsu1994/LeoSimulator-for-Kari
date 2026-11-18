@@ -102,7 +102,9 @@ if __name__ == "__main__":
 def make_native_bundle(inputs, directory, config_name, model_hash, config, run_id, entry=None):
     """Versioned replay binds the exact normalized inputs and recorded metrics to replay."""
     directory=Path(directory)
-    bundle,files=make_bundle(inputs,(directory/'routes.csv').read_bytes(),config_name,model_hash,run_id=run_id,provenance='native-simulation',entry=entry)
+    csv=directory/'routes.csv';inline=csv.stat().st_size<=4*1024*1024
+    bundle,files=make_bundle(inputs,csv.read_bytes() if inline else b'',config_name,model_hash,run_id=run_id,provenance='native-simulation',entry=entry)
+    if not inline:files.pop('routes.csv')
     config_bytes=json.dumps(config,ensure_ascii=False,allow_nan=False,sort_keys=True).encode('utf-8')
     files['normalized.json']=config_bytes
     for name in ['summary.json','timeseries.csv','network-events.jsonl','failures.csv','physical-events.json','common-srd.json','control-series.csv']:
@@ -126,5 +128,11 @@ def make_native_bundle(inputs, directory, config_name, model_hash, config, run_i
     m['algorithmSettings'].update({k:config.get(k) for k in ('algorithm','labelCap','reservedPaths','csibEnabled','csibPeriod','csibVote','processingMode','reserveDelay','repairDelay','spfDelay')})
     m['inputHash']=hashlib.sha256(config_bytes).hexdigest()
     m['files']={name:hashlib.sha256(data).hexdigest() for name,data in files.items()}
+    if not inline:
+        digest=hashlib.sha256()
+        with csv.open('rb') as stream:
+            for chunk in iter(lambda:stream.read(1024*1024),b''):digest.update(chunk)
+        m['files']['routes.csv']=digest.hexdigest()
+        bundle['fileUrls']={'routes.csv':'/data/runs/'+run_id+'/routes.csv'}
     bundle['files']={name:data.decode('utf-8') for name,data in files.items()}
     return bundle,files

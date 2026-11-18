@@ -32,4 +32,18 @@ class BundleTests(unittest.TestCase):
         self.assertNotEqual(a['manifest']['runId'],b['manifest']['runId'])
         self.assertEqual(a['manifest']['files'],b['manifest']['files'])
 
+    def test_large_native_csv_is_referenced_without_overwriting_source(self):
+        from result_bundle import make_native_bundle
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp);raw=b'time,route,source,station,firstSat,exitSat,satHops,uplinkMs,satToStationMs,totalMs,path\n'+b'1,1,GS0,2,3,4,1,2.5,3.5,6,3-4\n'*180000
+            self.assertGreater(len(raw),4*1024*1024);(folder/'routes.csv').write_bytes(raw)
+            for name in ('summary.json','physical-events.json','common-srd.json'):(folder/name).write_text('{}')
+            for name in ('timeseries.csv','network-events.jsonl','failures.csv','control-series.csv'):(folder/name).write_text('')
+            bundle,files=make_native_bundle({ENTRY:b'[General]'},folder,'Example','model',{},'large-result-run')
+            self.assertNotIn('routes.csv',files);self.assertNotIn('routes.csv',bundle['files'])
+            self.assertEqual(bundle['manifest']['files']['routes.csv'],hashlib.sha256(raw).hexdigest())
+            self.assertTrue(bundle['fileUrls']['routes.csv'].endswith('/routes.csv'))
+            self.assertLess(len(json.dumps(bundle)),100000)
+            write_bundle(folder,bundle,files);self.assertEqual((folder/'routes.csv').read_bytes(),raw)
+
 if __name__=='__main__': unittest.main()

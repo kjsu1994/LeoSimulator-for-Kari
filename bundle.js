@@ -116,22 +116,26 @@ function readReplayIni(files, entry, selected) {
   }
   return cfg;
 }
-async function prepareBundle(bundle) {
+async function prepareBundleFiles(bundle, progress=()=>{}, existing=null) {
   const m=bundle.manifest;
   if(!m || (!["leo-native-replay-v2","leo-native-replay-v3","leo-native-replay-v4"].includes(m.format) && (m.format!=="florasat-csv-ini-v1"||m.profile!==REPLAY_MODEL.profile||m.modelHash!==REPLAY_MODEL.modelHash)) || (["leo-native-replay-v2","leo-native-replay-v3","leo-native-replay-v4"].includes(m.format) && (m.profile!== ("leo-native-delta-v"+m.format.slice(-1))||m.orbitModelHash!==REPLAY_MODEL.modelHash)))throw new Error("지원하지 않는 실행 결과 또는 원본 모델 버전입니다.");
   if(!/^[a-zA-Z0-9-]{8,80}$/.test(m.runId)||!m.files||!m.configName||Object.keys(m.overrides||{}).length)throw new Error("Invalid result metadata/overrides");
   const files=new Map(Object.entries(bundle.files||{}));
   for(const [name,expected] of Object.entries(m.files)){
-    if(bundlePath("manifest.json",name)!==name||!files.has(name)||typeof files.get(name)!=="string")throw new Error(`Missing/invalid result file: ${name}`);
-    const bytes=new TextEncoder().encode(files.get(name));
+    if(bundlePath("manifest.json",name)!==name)throw new Error(`Invalid result path: ${name}`);
+    if(!files.has(name)&&bundle.fileUrls?.[name]){const response=await fetch(bundle.fileUrls[name],{cache:"no-store"});if(!response.ok)throw Error(`Missing result file: ${name}`);files.set(name,name===m.csvPath?await response.blob():await response.text());}
+    const value=files.get(name);if(typeof value!=="string"&&!(value instanceof Blob))throw new Error(`Missing/invalid result file: ${name}`);
+    progress(`파일 확인: ${name}`);
+    const bytes=value instanceof Blob?await value.arrayBuffer():new TextEncoder().encode(value);
     const hash=[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(n=>n.toString(16).padStart(2,"0")).join("");
     if(hash!==expected)throw new Error(`파일이 변경되었습니다: ${name}`);
+    if(value instanceof Blob&&name!==m.csvPath)files.set(name,await value.text());
   }
   if(!Object.hasOwn(m.files,m.entryIni)||!Object.hasOwn(m.files,m.csvPath))throw new Error("Missing required result files");
   const checked=new Map([...files].filter(([name])=>Object.hasOwn(m.files,name)));
   const native=["leo-native-replay-v2","leo-native-replay-v3","leo-native-replay-v4"].includes(m.format);
   if(native && (!m.normalizedPath||!Object.hasOwn(m.files,m.normalizedPath)||!Object.hasOwn(m.files,"summary.json")||!Object.hasOwn(m.files,"network-events.jsonl")||!Object.hasOwn(m.files,"timeseries.csv")))throw new Error("계측 결과 파일이 누락되었습니다.");
-  const cfg=native?JSON.parse(checked.get(m.normalizedPath)):readReplayIni(checked,m.entryIni,m.configName),rows=parseRoutesCsv(checked.get(m.csvPath));
+  const cfg=native?JSON.parse(checked.get(m.normalizedPath)):readReplayIni(checked,m.entryIni,m.configName);
   if(native && (![2,3,4].includes(cfg.normalizedVersion)||!Array.isArray(cfg.stations)||cfg.numTerminals!==0||!Number.isInteger(cfg.numSatellites)||cfg.numSatellites<6||cfg.numSatellites>20000||cfg.planes<2||cfg.numSatellites%cfg.planes||cfg.altitude<220||cfg.altitude>2000||!Number.isFinite(cfg.simTimeLimit)||cfg.simTimeLimit<=0))throw new Error("지원하지 않는 정규화 설정입니다.");
   const summary=native?JSON.parse(checked.get("summary.json")):null;
   const networkEvents=native?checked.get("network-events.jsonl").split(/\r?\n/).filter(Boolean).map(s=>JSON.parse(s)):[];
@@ -140,10 +144,35 @@ async function prepareBundle(bundle) {
   if(series.some(r=>r.length!==9||r.some(v=>!Number.isFinite(v))))throw new Error("Invalid metric series");
   const controlSeries=native&&checked.has("control-series.csv")?checked.get("control-series.csv").trim().split(/\r?\n/).slice(1).map(s=>s.split(",").map(Number)):[];
   if(controlSeries.some(r=>r.length!==8||r.some(v=>!Number.isFinite(v))))throw new Error("Invalid control series");
-  for(const r of rows)if(r[7]||r[2]>=cfg.stations.length||r[3]>=cfg.stations.length||r[6].some(id=>id>=cfg.numSatellites)||r[0]>cfg.simTimeLimit)throw new Error("CSV does not match supported scenario settings");
-  return {ok:true,routes:rows,states:[],config:cfg,manifest:m,replay:true,summary,networkEvents,series,controlSeries,bundle,runId:m.runId,inputHash:m.inputHash||m.modelHash,csvHash:m.files[m.csvPath],createdAt:m.createdAt};
+  const validate=r=>{if(r[7]||r[2]>=cfg.stations.length||r[3]>=cfg.stations.length||r[6].some(id=>id>=cfg.numSatellites)||r[0]>cfg.simTimeLimit)throw new Error("CSV does not match supported scenario settings");};
+  const csv=checked.get(m.csvPath);let rows;
+  if(existing?.manifest&&m.files[m.csvPath]===existing.csvHash&&JSON.stringify(cfg)===JSON.stringify(existing.config)&&Object.keys(m.files).length===Object.keys(existing.manifest.files).length&&Object.entries(m.files).every(([name,hash])=>existing.manifest.files[name]===hash))rows=existing.routes;
+  else if(csv instanceof Blob)rows=await parseRoutesBlob(csv,validate,p=>progress(`경로 읽는 중 ${Math.round(p*100)}%`));
+  else {rows=parseRoutesCsv(csv);for(const row of rows)validate(row);}
+
+  return {notice:bundle.notice,ok:true,routes:rows,states:[],config:cfg,manifest:m,replay:true,summary,networkEvents,series,controlSeries,bundle,runId:m.runId,inputHash:m.inputHash||m.modelHash,csvHash:m.files[m.csvPath],createdAt:m.createdAt};
 }
-if(typeof module!=="undefined")module.exports={readReplayIni,prepareBundle,bundlePath,REPLAY_MODEL};
+async function storedFolderBundle(identifier){
+  if(!location.protocol.startsWith("http")||!/^[a-zA-Z0-9-]{8,80}$/.test(identifier))throw Error("선택한 폴더를 읽지 못했습니다. 실행 결과 폴더 접근 상태를 확인하세요.");
+  const response=await fetch(`/api/result?runId=${encodeURIComponent(identifier)}&metadata=1`,{cache:"no-store"});
+  if(!response.ok)throw Error("선택한 폴더를 읽지 못했고, 프로그램에도 해당 ID의 결과가 없습니다.");
+  const result=await response.json();if(!result?.bundle)throw Error("보관된 실행 결과를 찾지 못했습니다.");
+  result.bundle.notice="프로그램에 보관된 동일 ID의 실행 결과를 불러왔습니다.";return result.bundle;
+}
+async function prepareBundle(bundle,progress=()=>{},existing=null){
+  try{return await prepareBundleFiles(bundle,progress,existing);}
+  catch(error){if(error.name!=="NotReadableError"||!bundle.sourceFolderId)throw error;return prepareBundleFiles(await storedFolderBundle(bundle.sourceFolderId),progress,existing);}
+}
+async function bundleFromFiles(selection){
+  const manifests=selection.filter(file=>file.name==="manifest.json");
+  if(manifests.length!==1)throw Error(manifests.length?"실행 결과 하위 폴더 하나를 선택하세요.":"manifest.json이 있는 실행 결과 폴더를 선택하세요.");
+  const manifestFile=manifests[0],identifier=manifestFile.webkitRelativePath.split("/").at(-2);let text;
+  try{text=await manifestFile.text();}catch(error){if(error.name!=="NotReadableError")throw error;return storedFolderBundle(identifier);}
+  const manifest=JSON.parse(text.replace(/^\uFEFF/,"")),prefix=manifestFile.webkitRelativePath.slice(0,-manifestFile.name.length),available=new Map(selection.map(file=>[file.webkitRelativePath,file])),files={};
+  for(const name of Object.keys(manifest.files||{})){if(bundlePath("manifest.json",name)!==name)throw Error(`Invalid result path: ${name}`);const file=available.get(prefix+name);if(!file)throw Error(`Missing/invalid result file: ${name}`);files[name]=file;}
+  return {manifest,files,sourceFolderId:identifier};
+}
+if(typeof module!=="undefined")module.exports={readReplayIni,prepareBundle,bundlePath,REPLAY_MODEL,bundleFromFiles};
 
 let networkReplayCache=null;
 function applyNetworkTimeline(snapshot,events,runId,time) {

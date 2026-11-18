@@ -59,6 +59,22 @@ class DataTests(unittest.TestCase):
                 httpd.server_close()
                 thread.join()
 
+    def test_large_result_api_reads_manifest_without_duplicate_json(self):
+        import http.server,threading,urllib.request
+        with tempfile.TemporaryDirectory() as tmp,patch.object(server,'BASE_DIR',tmp):
+            base=Path(tmp);folder=base/'data/runs/large-result-run';folder.mkdir(parents=True)
+            (base/'data/latest.json').write_text(json.dumps({'runId':'large-result-run'}))
+            manifest={'runId':'large-result-run','files':{'routes.csv':'checksum'}}
+            (folder/'manifest.json').write_text(json.dumps(manifest))
+            with (folder/'result.json').open('wb') as f:f.seek(9*1024*1024);f.write(b'invalid duplicate JSON')
+            httpd=http.server.ThreadingHTTPServer(('127.0.0.1',0),server.SimHandler);thread=threading.Thread(target=httpd.serve_forever,daemon=True);thread.start()
+            try:
+                for query in ('','?metadata=1'):
+                    with urllib.request.urlopen(f'http://127.0.0.1:{httpd.server_port}/api/result'+query) as response:result=json.load(response)
+                    self.assertEqual(result['bundle']['manifest'],manifest)
+                    self.assertEqual(result['bundle']['fileUrls']['routes.csv'],'/data/runs/large-result-run/routes.csv')
+            finally:httpd.shutdown();httpd.server_close();thread.join()
+
     def test_missing_include_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp, "omnetpp.ini")

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 const assert=require("node:assert/strict"),fs=require("node:fs"),path=require("node:path"),vm=require("node:vm");
-const {readReplayIni,prepareBundle,bundlePath}=require("./bundle.js");
+const {readReplayIni,prepareBundle,bundlePath,bundleFromFiles}=require("./bundle.js");
 const {parseRoutesCsv}=require("./csv.js");
 global.parseRoutesCsv=parseRoutesCsv;
 const dir=path.join(__dirname,"testdata/bundle");
@@ -9,6 +9,14 @@ const manifest=JSON.parse(fs.readFileSync(path.join(dir,"manifest.json"),"utf8")
 const files=Object.fromEntries(Object.keys(manifest.files).map(n=>[n,fs.readFileSync(path.join(dir,n),"utf8")]));
 (async()=>{
   const prepared=await prepareBundle({manifest,files});
+  const savedFetch=global.fetch,savedLocation=global.location;let fallbackCalls=0;
+  global.location={protocol:'http:'};global.fetch=async()=>{fallbackCalls++;return new Response(JSON.stringify({bundle:{manifest,files}}));};
+  try{
+    const unreadable={name:'manifest.json',webkitRelativePath:'reference-dijkstra/manifest.json',text:async()=>{const e=Error('blocked');e.name='NotReadableError';throw e;}};
+    const recovered=await bundleFromFiles([unreadable]);assert(recovered.notice);assert.equal((await prepareBundle(recovered)).routes.length,2671);
+    await assert.rejects(bundleFromFiles([{...unreadable,text:async()=>'{broken'}]));assert.equal(fallbackCalls,1);
+    await assert.rejects(prepareBundle({manifest,files:{...files,'routes.csv':'changed'},sourceFolderId:'reference-dijkstra'}));assert.equal(fallbackCalls,1);
+  }finally{global.fetch=savedFetch;global.location=savedLocation;}
   assert.equal(prepared.config.numSatellites,132);assert.equal(prepared.config.stations.length,13);
   assert.equal(prepared.config.stations[9].mobile,true);assert.equal(prepared.config.stations[9].speed,250);
   assert.equal(prepared.config.metric,"delay");assert.equal(prepared.routes.length,2671);

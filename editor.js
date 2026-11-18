@@ -100,7 +100,7 @@ function buildEntryForm(entry=null){
       area.append(control("범위 내 세기","target-profile",params.profile||"uniform","select",{uniform:"균일",hotspot:"중심이 강한 핫스팟"}),control("경계 세기 (%)","target-edge_pct",params.edge_pct??20,"number",{min:0,max:100}));
     }
     if(k==="path_hops"){
-      const chosen=selectedRouteId?routes.find(r=>r[1]===selectedRouteId):null;const options={"":"경로 선택",...Object.fromEntries(routes.slice(-100).map(r=>[r[1],`${r[0].toFixed(2)}s · ${r[2]}→${r[3]} · ${r[4]}홉`]))};
+      const chosen=selectedRouteId?findRouteById(routes,selectedRouteId):null;const options={"":"경로 선택",...Object.fromEntries(routes.slice(-100).map(r=>[r[1],`${r[0].toFixed(2)}s · ${r[2]}→${r[3]} · ${r[4]}홉`]))};
       area.append(control("기준 경로","entry-route",chosen?.[1]??"","select",options));
     }
     area.append(control("방향","target-direction",params.direction||"both","select",k==="link"?{both:"양방향",out:"A → B",in:"B → A"}:{both:"양방향",out:"나가는 방향",in:"들어오는 방향"}));
@@ -120,7 +120,7 @@ function buildEntryForm(entry=null){
 function entryFromForm(){
   const k=value("entry-kind");const p={};for(const input of byId("entry-target").querySelectorAll("input[id^=target-],select[id^=target-]"))p[input.id.slice(7)]=input.type==="number"?Number(input.value):input.value;
   let kind=k;if(["plane_range","latlon_box","srd"].includes(k)){kind="zone";p.zone_kind=k;}if(["rect","circle"].includes(k)){kind="region";p.shape=k;}if(k==="link")p.bidirectional=p.direction==="both";
-  if(k==="path_hops") {const r=routes.find(r=>r[1]===Number(value("entry-route")));if(nativeUI.baseline)nativeUI.scenario.baseline=structuredClone(nativeUI.baseline);else {if(!r)throw Error("기준 경로를 선택하세요.");nativeUI.scenario.baseline={route:r[6],runId:resultMeta?.runId,time:r[0]};}}
+  if(k==="path_hops") {const r=findRouteById(routes,Number(value("entry-route")));if(nativeUI.baseline)nativeUI.scenario.baseline=structuredClone(nativeUI.baseline);else {if(!r)throw Error("기준 경로를 선택하세요.");nativeUI.scenario.baseline={route:r[6],runId:resultMeta?.runId,time:r[0]};}}
   const e={target:{kind,params:p},start_s:numeric("entry-start"),end_s:value("entry-end")===""?null:numeric("entry-end"),ramp_s:numeric("entry-ramp"),rho:numeric("entry-rho")/100};
   if(e.start_s<0||e.start_s>=numeric("edit-simTimeLimit")||(e.end_s!==null&&e.end_s<=e.start_s))throw Error("조건의 시작·종료 시각을 확인하세요.");
   for(const key of ["fail","use_capacity","use_buffer","use_queue"])e[key]=byId("entry-"+key).checked;
@@ -194,8 +194,7 @@ function showComparison(a,b){
   const capture=node("button",{type:"button"},"기준 경로를 혼잡 설정에 사용");capture.onclick=()=>{const route=a.routes[0];if(!route){byId("comparisonStatus").textContent="기준 결과에 경로가 없습니다.";return;}nativeUI.baseline={runId:a.runId,route:route[6],time:route[0]};byId("comparisonStatus").textContent=`기준 경로 ${route[6].join(" → ")} 선택됨`;render();};content.append(capture);
 }
 async function readComparisonFolder(files){
-  const all=[...files],manifest=all.find(f=>f.name==="manifest.json");if(!manifest)throw Error("manifest.json이 없습니다.");const m=JSON.parse(await manifest.text()),prefix=manifest.webkitRelativePath.slice(0,-manifest.name.length),texts={};
-  for(const name of Object.keys(m.files)){const f=all.find(f=>f.webkitRelativePath===prefix+name);if(!f)throw Error(`파일 없음: ${name}`);texts[name]=await f.text();}return prepareBundle({manifest:m,files:texts});
+  return prepareBundle(await bundleFromFiles([...files]),msg=>byId("comparisonStatus").textContent=msg);
 }
 for(const [id,key]of [["baselineFolder","a"],["comparisonFolder","b"]])byId(id).onchange=async e=>{try{const result=await readComparisonFolder(e.target.files);if(!result.summary)throw Error("수신 통계가 포함된 실행 결과를 선택하세요.");comparisonInputs[key]=result;byId("comparisonStatus").textContent=`${key==="a"?"기준":"비교"} 실행: ${result.runId}`;if(comparisonInputs.a&&comparisonInputs.b)showComparison(comparisonInputs.a,comparisonInputs.b);}catch(err){byId("comparisonStatus").textContent=err.message;}};
 byId("btnCompare").onclick=async()=>{
@@ -203,7 +202,7 @@ byId("btnCompare").onclick=async()=>{
   const online=location.protocol!=="file:";for(const id of ["baselineRun","scenarioRun","loadComparison"])byId(id).disabled=!online;if(!online)return;
   try{const response=await fetch("/api/runs");const list=await response.json();for(const id of ["baselineRun","scenarioRun"]){const select=byId(id);select.replaceChildren();for(const r of list)select.add(new Option(`${r.configName} · ${r.summary.algorithm} · ${r.runId}`,r.runId));}if(nativeUI.result)byId("scenarioRun").value=nativeUI.result.runId;if(list.length>1)byId("baselineRun").selectedIndex=1;}catch(e){byId("comparisonStatus").textContent=e.message;}
 };
-byId("loadComparison").onclick=async()=>{try{const results=await Promise.all([value("baselineRun"),value("scenarioRun")].map(async id=>{const response=await fetch(`/api/result?runId=${encodeURIComponent(id)}`),result=await response.json();if(!response.ok||!result?.bundle)throw Error(result?.error||"실행 결과가 없습니다.");return prepareBundle(result.bundle);}));comparisonInputs.a=results[0];comparisonInputs.b=results[1];showComparison(...results);}catch(e){byId("comparisonStatus").textContent=e.message;}};
+byId("loadComparison").onclick=async()=>{try{const results=await Promise.all([value("baselineRun"),value("scenarioRun")].map(async id=>{const response=await fetch(`/api/result?runId=${encodeURIComponent(id)}&metadata=1`),result=await response.json();if(!response.ok||!result?.bundle)throw Error(result?.error||"실행 결과가 없습니다.");return prepareBundle(result.bundle);}));comparisonInputs.a=results[0];comparisonInputs.b=results[1];showComparison(...results);}catch(e){byId("comparisonStatus").textContent=e.message;}};
 function drawScenarioOverlay(snapshot,time){
   if(!snapshot)return;const entries=resultMeta?.config?.scenario?.entries||nativeUI.config?.scenario?.entries||[];ctx.save();ctx.strokeStyle="#ffb65c";ctx.fillStyle="rgba(255,166,65,.13)";ctx.lineWidth=3;
   for(const e of entries){if(time<(e.start_s||0)||(e.end_s!=null&&time>=e.end_s))continue;const p=e.target?.params||{},kind=e.target?.kind;if(kind!=="region"&&!(kind==="zone"&&p.zone_kind==="latlon_box"))continue;

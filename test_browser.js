@@ -4,8 +4,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const { spawn } = require("node:child_process");
 const delay = ms => new Promise(r => setTimeout(r, ms));
-async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } catch { await delay(250); } } throw new Error("Startup timeout"); }
+async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { return await fn(); } catch { await delay(250); } } throw new Error("Startup timeout"); }
 (async () => {
+  const stored=process.argv.find(a=>a.startsWith("--stored-result"));
   const port=20000+Math.floor(Math.random()*10000)*2;
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "florasat-browser-"));
   const httpRoot=path.join(profile,"http");fs.mkdirSync(path.join(httpRoot,"data"),{recursive:true});
@@ -16,7 +17,7 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
   const referenceResult={ok:true,runId:referenceManifest.runId,bundle:{manifest:referenceManifest,files:referenceFiles}};
   const referenceFolder=path.join(httpRoot,"data/runs",referenceManifest.runId);fs.mkdirSync(referenceFolder,{recursive:true});
   fs.writeFileSync(path.join(referenceFolder,"result.json"),JSON.stringify(referenceResult));fs.writeFileSync(path.join(httpRoot,"data/latest.json"),JSON.stringify({runId:referenceManifest.runId}));fs.writeFileSync(path.join(httpRoot,"data/latest_result.js"),"window.SIM_RESULT="+JSON.stringify(referenceResult)+";");
-  const server = spawn("python", ["-c", `import server,http.server,sys,os;server.BASE_DIR=sys.argv[1];server.LEO_DIR=os.path.join(server.BASE_DIR,'settings');server.INI_PATH=os.path.join(server.LEO_DIR,'simulations/Network/omnetpp.ini');http.server.ThreadingHTTPServer(('127.0.0.1',${port}),server.SimHandler).serve_forever()`,httpRoot], {cwd: __dirname, windowsHide:true, stdio:"ignore"});
+  const server = spawn("python", ["-c", `import server,http.server,sys,os;server.BASE_DIR=sys.argv[1];server.LEO_DIR=os.path.join(server.BASE_DIR,'settings');server.INI_PATH=os.path.join(server.LEO_DIR,'simulations/Network/omnetpp.ini');http.server.ThreadingHTTPServer(('127.0.0.1',${port}),server.SimHandler).serve_forever()`,stored?__dirname:httpRoot], {cwd: __dirname, windowsHide:true, stdio:"ignore"});
   const browser = spawn("C:/Program Files/Google/Chrome/Application/chrome.exe", ["--headless=new", "--disable-extensions", "--disable-background-networking", "--no-first-run", `--remote-debugging-port=${port+1}`, `--user-data-dir=${profile}`, "about:blank"], {windowsHide:true, stdio:"ignore"});
   let ws;
   try {
@@ -29,7 +30,25 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     const send=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;const timer=setTimeout(()=>{pending.delete(key);reject(Error(`CDP timeout: ${method}`));},40000);pending.set(key,{resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}});ws.send(JSON.stringify({id:key,method,params}));});
     const evaluate=async expression=> {const r=await send("Runtime.evaluate",{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
     await send("Runtime.enable");
+    if(stored)await send("Emulation.setDeviceMetricsOverride",{width:1520,height:900,deviceScaleFactor:1,mobile:false});
     await send("Page.navigate",{url:`http://127.0.0.1:${port}`});
+    if(stored){
+      await retry(async()=>assert(await evaluate("typeof lastSatStates!=='undefined' && lastSatStates.length>0")));
+      console.log("Actual stored result: initial map visible before CSV finishes");
+      await retry(async()=>assert(await evaluate("typeof resultMeta!=='undefined' && !!resultMeta?.replay")),720);
+      const count=await evaluate("routes.length"),expected=Number(stored.split('=')[1]);if(expected)assert.equal(count,expected);
+      assert(await evaluate("!performance.getEntriesByType('resource').some(r=>r.name.includes('latest_result.js'))"));
+      console.log("Actual stored result loaded:",count,"routes;",await evaluate("[lastSatStates.length,routes.sumsAt?.(routes.length),runStatus.textContent]"));
+      const identifier=await evaluate("resultMeta.runId");await evaluate("window.beforeFolderReload=resultMeta");
+      const {root}=await send("DOM.getDocument"),{nodeId}=await send("DOM.querySelector",{nodeId:root.nodeId,selector:"#resultFolder"});
+      await send("DOM.setFileInputFiles",{nodeId,files:[path.join(__dirname,'data/runs',identifier)]});
+      await retry(async()=>assert(await evaluate("resultMeta!==window.beforeFolderReload")),720).catch(async error=>{console.error("Stored folder failure:",await evaluate("({status:runStatus.textContent,request:resultLoadRequest,rows:routes.length})"),errors);throw error;});
+      assert.equal(await evaluate("routes.length"),count);assert(await evaluate("lastSatStates.length>0 && stateAt(simTime).links.length>0"));
+      assert.equal(errors.length,0,JSON.stringify(errors));
+      const screenshot=await send("Page.captureScreenshot",{format:"png"});fs.mkdirSync(path.join(__dirname,'build'),{recursive:true});fs.writeFileSync(path.join(__dirname,'build/map-check.png'),Buffer.from(screenshot.data,'base64'));
+      console.log("Actual folder reupload passed without reading duplicate result.json; map screenshot: build/map-check.png");
+      await send("Browser.close");return;
+    }
     await retry(async()=> assert(await evaluate("typeof resultMeta !== 'undefined' && resultMeta?.replay === true"))).catch(async err=>{console.error('Startup state:',await evaluate("({status:document.getElementById('runStatus')?.textContent,meta:typeof resultMeta,loaded:!!window.SIM_RESULT})"),errors);throw err;});
     assert.equal(await evaluate("document.getElementById('scenarioDetails').open"),false);
     assert.equal(await evaluate("document.getElementById('iniTable').checkVisibility()"),false);
