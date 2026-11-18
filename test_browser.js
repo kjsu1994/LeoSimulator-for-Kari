@@ -90,6 +90,22 @@ async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { retu
     await evaluate("(async()=>{openSettings(await fetch('/api/config?config=PaperS1Mcsr').then(r=>r.json()))})()");
     assert.equal(await evaluate("document.querySelectorAll('.sender-check').length"),100);
     assert.equal(await evaluate("value('edit-algorithm')"),"mcsr-ls");
+    assert.equal(await evaluate("byId('settingsAdvanced').open"),false);
+    assert(await evaluate("byId('edit-hrJitterMs').disabled && byId('edit-tsDelayBoundMs').disabled"));
+    await evaluate("byId('edit-algorithm').value='mcsr-hr';updateMcsrControls()");
+    assert(await evaluate("!byId('edit-hrJitterMs').disabled && byId('edit-tsDelayBoundMs').disabled"));
+    await evaluate("byId('edit-algorithm').value='mcsr-ts';updateMcsrControls()");
+    assert(await evaluate("byId('edit-hrJitterMs').disabled && !byId('edit-tsDelayBoundMs').disabled"));
+    await evaluate("byId('edit-csibEnabled').checked=false;updateMcsrControls()");
+    assert(await evaluate("byId('edit-csibPeriod').disabled && !byId('edit-csibEnabled').disabled"));
+    await evaluate("byId('edit-csibEnabled').checked=true;byId('edit-processingMode').value='assumed';updateMcsrControls()");
+    assert(await evaluate("!byId('edit-csibPeriod').disabled && !byId('edit-csibComputeDelay').disabled && !byId('settingsModelStatus').hidden"));
+    await evaluate("byId('edit-processingMode').value='neutral';updateMcsrControls();byId('edit-processingMode').value='assumed';updateMcsrControls()");
+    assert(await evaluate("!byId('edit-csibComputeDelay').disabled"));
+    await evaluate("byId('edit-algorithm').value='dijkstra-delay';byId('edit-controlMode').value='time';byId('edit-failureKnowledge').value='propagate';updateMcsrControls()");
+    assert(await evaluate("!byId('edit-failureScopeHops').disabled && !byId('edit-srdK').disabled && byId('edit-floodModel').disabled && !byId('edit-spfDelay').disabled"));
+    await evaluate("byId('edit-controlMode').value='packet';byId('edit-processingMode').value='neutral';byId('edit-algorithm').value='mcsr-ls';updateMcsrControls()");
+    assert(await evaluate("byId('edit-failureScopeHops').disabled && byId('edit-spfDelay').disabled && byId('settingsModelStatus').hidden"));
     await evaluate("byId('edit-bitrate').value=60;byId('edit-bitrate').oninput()");
     assert(Math.abs(await evaluate("Number(value('edit-sendInterval'))")-.000184)<1e-12);
     await evaluate("byId('entry-kind').value='circle';byId('entry-kind').onchange();byId('entry-city').value='서울';byId('entry-city').onchange()");
@@ -99,9 +115,11 @@ async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { retu
     assert(await evaluate("byId('edit-csibPeriod').disabled"));
     await evaluate("byId('settingsDialog').close()");
 
-    await evaluate("(async()=>{const cfg=await fetch('/api/config?config=PaperS1Load').then(r=>r.json());openSettings(cfg);window.savedRequest=null;window.realFetch=window.fetch;window.fetch=async(url,options)=>{if(url==='/api/config'&&options?.method==='POST'){window.savedRequest=JSON.parse(options.body);return new Response(JSON.stringify(cfg),{status:200});}return realFetch(url,options);};byId('settingsForm').requestSubmit(byId('settingsForm').querySelector('[type=submit]'));})()");
+    await evaluate("(async()=>{const cfg=await fetch('/api/config?config=PaperS1Load').then(r=>r.json());openSettings(cfg);byId('edit-hrJitterMs').value='';byId('edit-csibComputeDelay').value='';window.savedRequest=null;window.realFetch=window.fetch;window.fetch=async(url,options)=>{if(url==='/api/config'&&options?.method==='POST'){window.savedRequest=JSON.parse(options.body);return new Response(JSON.stringify(cfg),{status:200});}return realFetch(url,options);};byId('settingsForm').requestSubmit(byId('settingsForm').querySelector('[type=submit]'));})()");
     await retry(async()=>assert(await evaluate("window.savedRequest!==null && !byId('settingsDialog').open")));
     assert(await evaluate("!Object.hasOwn(savedRequest.changes,'destination') && !Object.hasOwn(savedRequest.changes,'sendInterval')"));
+    assert(await evaluate("!Object.hasOwn(savedRequest.changes,'hrJitterMs') && !Object.hasOwn(savedRequest.changes,'csibComputeDelay') && !Object.hasOwn(savedRequest.changes,'controlMode')"));
+    console.log("Settings passed: algorithm-specific visibility, common SRD, model status, reversible mode changes, hidden and unchanged INI values preserved");
     await evaluate("window.fetch=window.realFetch");
 
     const nativeFolder=path.join(profile,'native');fs.mkdirSync(nativeFolder);

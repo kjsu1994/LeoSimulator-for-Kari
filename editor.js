@@ -13,7 +13,25 @@ function group(title,open=false){const e=node("details",{class:"editor-group",op
 function value(id){return byId(id)?.value;}
 function numeric(id){const v=Number(value(id));if(!Number.isFinite(v)||value(id)==="")throw Error("입력값을 확인하세요.");return v;}
 function modeChanged(){const mode=value("edit-congestionMode");byId("scenarioModeText").textContent=mode==="actual"?"실제 송신과 큐의 대기·폐기를 기록합니다.":"외부 혼잡 효과를 링크 상태에 반영합니다.";}
-function updateMcsrControls(){const enabled=value("edit-algorithm").startsWith("mcsr-");for(const e of document.querySelectorAll("[data-mcsr]")){e.hidden=!enabled;for(const input of e.querySelectorAll("input,select"))input.disabled=!enabled;}}
+function updateMcsrControls(){
+  const algorithm=value("edit-algorithm"),mcsr=algorithm.startsWith("mcsr-"),packet=value("edit-controlMode")==="packet",assumed=value("edit-processingMode")==="assumed",csib=mcsr&&byId("edit-csibEnabled").checked,environment=value("edit-congestionMode")==="environment";
+  for(const group of document.querySelectorAll("[data-mcsr]"))group.hidden=!mcsr;
+  const conditions={
+    hrJitterMs:algorithm==="mcsr-hr",tsDelayBoundMs:algorithm==="mcsr-ts",jitterWindow:mcsr,jitterSource:mcsr,
+    csibVote:csib,csibPeriod:csib,csibMonitorInterval:csib,csibMessageBytes:csib,
+    csibComputeDelay:csib&&assumed,csibReportProcDelay:csib&&assumed&&packet,csibHopProcDelay:csib&&assumed&&packet,csibDetectDelay:csib&&!packet,
+    reserveDelay:mcsr&&assumed,repairDelay:mcsr&&assumed,spfDelay:!mcsr&&assumed,floodHopDelay:assumed||!packet,
+    failureKnowledge:!packet,failureScopeHops:!packet&&value("edit-failureKnowledge")==="propagate",
+    routingQueueCapacity:mcsr&&!packet&&Number(value("edit-queueCapacity"))===0,
+    controlRefresh:packet,controlTimeout:packet,controlHeaderBytes:packet,controlRecordBytes:packet,controlMtu:packet,controlReassemblyTimeout:packet,controlResyncInterval:packet,
+    congestionRefresh:environment,congestionBuffer:environment,congestionPacketBytes:environment,congestionZones:environment,congestionAware:environment&&!mcsr
+  };
+  for(const [key,enabled]of Object.entries(conditions)){const input=byId("edit-"+key);if(input)input.closest("label").hidden=!enabled;}
+  for(const input of byId("settingsFields").querySelectorAll("[id^='edit-']"))input.disabled=!!input.closest("[hidden]");
+  const alternatives=[value("edit-processingMode")==="assumed"&&"처리 지연 가정",!packet&&"시간 기반 제어",value("edit-jitterModel")==="cost"&&"비용 기반 지터"].filter(Boolean);
+  byId("settingsModelStatus").textContent=alternatives.length?"모델 검증 · "+alternatives.join(" · "):"";
+  byId("settingsModelStatus").hidden=!alternatives.length;
+}
 function openSettings(cfg){
   nativeUI.config=cfg;nativeUI.scenario=structuredClone(cfg.scenario||{schema:1,method:"environment",entries:[]});nativeUI.entryIndex=-1;
   const container=byId("settingsFields");container.replaceChildren();byId("settingsError").textContent="";
@@ -22,7 +40,7 @@ function openSettings(cfg){
   const basicKeys=["numSatellites","planes","altitude","inclination","simTimeLimit","seed"];
   const addField=(grid,f)=>grid.append(control(f.label,"edit-"+f.key,cfg[f.key],"number",{min:f.min,max:f.max,step:f.type==="int"?"1":"any"}));
   for(const f of cfg.capabilities.fields.filter(f=>basicKeys.includes(f.key)))addField(grid,f);
-  const [models,mg]=group("실험 모델",true);container.append(models);
+  const [models,mg]=group("모델 검증");container.append(models);
   for(const [key,label,choices]of [["processingMode","처리 지연",{neutral:"추가 지연 없음",assumed:"가정값 적용"}],["controlMode","제어 통신",{packet:"실제 패킷",time:"시간 가정"}],["jitterModel","지터",{packet:"실제 지연 변동",cost:"라우팅 비용 주입"}],["islMode","ISL 연결",{fixed:"고정 격자",scheduled:"계획된 개폐"}]])mg.append(control(label,"edit-"+key,cfg[key]||Object.keys(choices)[0],"select",choices));
   for(const [key,label]of [["controlRefresh","제어 갱신 (s)"],["controlTimeout","수집 제한 시간 (s)"],["controlHeaderBytes","제어 헤더 (B)"],["controlRecordBytes","상태 레코드 (B)"],["controlMtu","제어 MTU (B)"],["controlReassemblyTimeout","재조립 제한 (s)"],["controlResyncInterval","재동기화 주기 (s)"]])mg.append(control(label,"edit-"+key,cfg[key],"number",{min:key==="controlMtu"?64:key.endsWith("Bytes")?1:1e-11,step:key.endsWith("Bytes")||key==="controlMtu"?1:"any"}));
   const scheduleLabel=node("label",{class:"file-btn"},"ISL 개폐 일정 가져오기"),scheduleFile=node("input",{type:"file",accept:".csv",hidden:true});scheduleLabel.append(scheduleFile);mg.append(scheduleLabel);
@@ -58,9 +76,9 @@ function openSettings(cfg){
   const [csib,cf]=group("DS·CSIB");csib.dataset.mcsr="1";container.append(csib);
   for(const key of ["csibEnabled","csibVote"]){const label=node("label",{class:"check-field"});label.append(node("input",{id:"edit-"+key,type:"checkbox",checked:cfg[key]}),document.createTextNode(key==="csibEnabled"?"DS·CSIB 사용":"DS 투표 사용"));cf.append(label);}
   for(const f of cfg.capabilities.fields.filter(f=>csibKeys.includes(f.key)))addField(cf,f);
-  const [experiment,ef]=group("MCSR 추가 실험");experiment.dataset.mcsr="1";container.append(experiment);
-  for(const f of cfg.capabilities.fields.filter(f=>experimental.includes(f.key)))addField(ef,f);
-  ef.append(control("플러딩 방식","edit-floodModel",cfg.floodModel,"select",{paper:"참조 방식",consistent:"축 일관 방식 (추가 실험)"}));
+  const [srd,sg]=group("공통 SRD");
+  for(const f of cfg.capabilities.fields.filter(f=>experimental.includes(f.key)))addField(sg,f);
+  mg.append(control("MCSR 경로 계산 방식","edit-floodModel",cfg.floodModel,"select",{paper:"참조 방식",consistent:"축 일관 방식 (추가 실험)"}));
   const [fault,ff]=group("장애·복구");container.append(fault);
   ff.append(control("장애 일정","edit-failureSchedule",cfg.failureSchedule,"text",{placeholder:"12-13@60+30 또는 route@60+30"}));
   ff.append(control("장애 정보 전달","edit-failureKnowledge",cfg.failureKnowledge,"select",{instant:"즉시",propagate:"감지·전파 후"}));
@@ -77,10 +95,24 @@ function openSettings(cfg){
   cg.append(control("기존 zones 설정","edit-congestionZones",cfg.congestionZones,"text"));
   const aware=node("label",{class:"check-field"});aware.append(node("input",{type:"checkbox",id:"edit-congestionAware",checked:cfg.congestionAware}),document.createTextNode("Dijkstra 비용에 환경 지연 반영"));cg.append(aware);
   cg.append(node("div",{id:"scenarioEntries",class:"scenario-entries"}),node("div",{id:"entryForm",class:"entry-form"}));
-  buildEntryForm();refreshEntries();byId("edit-congestionMode").onchange=modeChanged;modeChanged();
+  buildEntryForm();refreshEntries();byId("edit-congestionMode").onchange=()=>{modeChanged();updateMcsrControls();};modeChanged();
   const [recording,rf]=group("기록");container.append(recording);rf.append(control("경로 기록","edit-routeRecording",cfg.routeRecording,"select",{changes:"변경된 경로",full:"모든 계획 경로"}));
   const pt=node("label",{class:"check-field"});pt.append(node("input",{id:"edit-packetTrace",type:"checkbox",checked:cfg.packetTrace}),document.createTextNode("전체 패킷 기록 (대용량)"));rf.append(pt);
-  const applied=()=>{updateMcsrControls();for(const key of ["reserveDelay","repairDelay","spfDelay","csibComputeDelay","csibReportProcDelay","csibHopProcDelay","floodHopDelay"]){const e=byId("edit-"+key);if(e)e.disabled=e.disabled||value("edit-processingMode")==="neutral";}for(const key of ["failureKnowledge","failureScopeHops","csibDetectDelay"]){const e=byId("edit-"+key);if(e)e.disabled=value("edit-controlMode")==="packet";}};byId("edit-algorithm").onchange=applied;byId("edit-processingMode").onchange=()=>{for(const e of container.querySelectorAll("input,select"))e.disabled=false;applied();};byId("edit-controlMode").onchange=applied;applied();byId("settingsDialog").showModal();
+  const [advanced,ag]=group("고급 설정");advanced.id="settingsAdvanced";ag.classList.add("settings-sections");container.append(advanced);
+  const [routing,rg]=group("경로 계산");routing.dataset.mcsr="1";ag.append(routing);
+  const [protocol,pg]=group("제어 통신");ag.append(protocol);
+  // Keep the common SRD editable for Dijkstra-targeted scenarios as well.
+  ag.append(srd);
+  const move=(keys,target)=>{for(const key of keys){const input=byId("edit-"+key);if(input)target.append(input.closest("label"));}};
+  move(["labelCap","routingQueueCapacity","refreshInterval","flowTimeout","jitterWindow","jitterSource","snapshotOnDelayUpdate"],rg);
+  move(["slsInterval","slsMissCount","controlRefresh","controlTimeout","controlHeaderBytes","controlRecordBytes","controlMtu","controlReassemblyTimeout","controlResyncInterval","csibPeriod","csibMonitorInterval","csibMessageBytes"],pg);
+  move(["reserveDelay","repairDelay","spfDelay","floodHopDelay","failureKnowledge","failureScopeHops","csibComputeDelay","csibReportProcDelay","csibHopProcDelay","csibDetectDelay"],mg);
+  byId("edit-floodModel").closest("label").dataset.mcsr="1";
+  move(["islMode","islScheduleFile"],lf);lf.append(scheduleLabel);
+  ag.append(models,recording);
+  container.insertBefore(node("p",{id:"settingsModelStatus",class:"model-status",role:"status",hidden:true}),basic);
+  for(const key of ["algorithm","processingMode","controlMode","jitterModel","csibEnabled","failureKnowledge","queueCapacity"])byId("edit-"+key).addEventListener("change",updateMcsrControls);
+  updateMcsrControls();byId("settingsDialog").showModal();
 }
 const cities={"서울":[37.5665,126.978],"도쿄":[35.6762,139.6503],"베이징":[39.9042,116.4074],"싱가포르":[1.3521,103.8198],"시드니":[-33.8688,151.2093],"뭄바이":[19.076,72.8777],"두바이":[25.2048,55.2708],"모스크바":[55.7558,37.6173],"런던":[51.5074,-.1278],"파리":[48.8566,2.3522],"프랑크푸르트":[50.1109,8.6821],"카이로":[30.0444,31.2357],"라고스":[6.5244,3.3792],"요하네스버그":[-26.2041,28.0473],"뉴욕":[40.7128,-74.006],"로스앤젤레스":[34.0522,-118.2437],"멕시코시티":[19.4326,-99.1332],"상파울루":[-23.5505,-46.6333],"부에노스아이레스":[-34.6037,-58.3816],"산티아고":[-33.4489,-70.6693]};
 function buildEntryForm(entry=null){
@@ -140,11 +172,12 @@ byId("settingsForm").onsubmit=async event=>{
     for(const f of cfg.capabilities.fields){const input=byId("edit-"+f.key);if(input&&!input.disabled)changes[f.key]=numeric("edit-"+f.key);}
     for(const key of Object.keys(cfg.capabilities.booleans)){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.checked;}
     for(const key of Object.keys(cfg.capabilities.choices)){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.value;}
-    for(const key of ["congestionMode","failureSchedule","failureKnowledge","congestionZones","routeRecording","failureReplay"]){const input=byId("edit-"+key);if(input)changes[key]=input.value;}
-    for(const key of ["randomFailures","randomStart","randomEnd","randomDuration","failureSeed","congestionRefresh","congestionBuffer","congestionPacketBytes"])changes[key]=numeric("edit-"+key);
-    for(const key of ["processingMode","controlMode","jitterModel","islMode","islScheduleFile"]){const e=byId("edit-"+key);if(e)changes[key]=e.value;}
-    for(const key of ["controlRefresh","controlTimeout","controlHeaderBytes","controlRecordBytes","controlMtu","controlReassemblyTimeout","controlResyncInterval"])changes[key]=numeric("edit-"+key);
+    for(const key of ["congestionMode","failureSchedule","failureKnowledge","congestionZones","routeRecording","failureReplay"]){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.value;}
+    for(const key of ["randomFailures","randomStart","randomEnd","randomDuration","failureSeed","congestionRefresh","congestionBuffer","congestionPacketBytes"]){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=numeric("edit-"+key);}
+    for(const key of ["processingMode","controlMode","jitterModel","islMode","islScheduleFile"]){const e=byId("edit-"+key);if(e&&!e.disabled)changes[key]=e.value;}
+    for(const key of ["controlRefresh","controlTimeout","controlHeaderBytes","controlRecordBytes","controlMtu","controlReassemblyTimeout","controlResyncInterval"]){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=numeric("edit-"+key);}
     changes.packetTrace=byId("edit-packetTrace").checked;
+    for(const key of Object.keys(changes))if(changes[key]===cfg[key])delete changes[key];
     const response=await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfg.activeConfig,changes,scenario:nativeUI.scenario})});const result=await response.json();if(!response.ok)throw Error(result.error||"저장하지 못했습니다.");
     applyLoadedConfig(result,{announce:true});byId("settingsDialog").close();setStatus("INI에 저장했습니다. 실행하면 새 설정이 적용됩니다.");
   }catch(e){byId("settingsError").textContent=e.message;}finally{save.disabled=false;}
