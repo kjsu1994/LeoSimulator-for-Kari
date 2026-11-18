@@ -588,26 +588,27 @@ document.getElementById("btnOpenIni").onclick = async () => {
 };
 
 let activeJob=null;
-document.getElementById("btnRunSim").onclick = async e => {
+async function runNative(algorithms=null) {
   if(!location.protocol.startsWith("http"))return setStatus("새 계산은 sim-ui.exe에서 실행하세요.");
-  const btn=e.target,stop=document.getElementById("btnStopSim");btn.disabled=true;stop.hidden=false;
+  const btn=document.getElementById("btnRunSim"),compare=document.getElementById("btnExperiment"),stop=document.getElementById("btnStopSim");btn.disabled=true;compare.disabled=true;stop.hidden=false;
   try {
-    let response=await fetch("/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfgNameSel.value})});
+    let response=await fetch(algorithms?"/api/experiments":"/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfgNameSel.value,...(algorithms?{algorithms}:{})})});
     let data=await response.json();if(!response.ok)throw Error(data.error||"실행하지 못했습니다.");
     activeJob=data.runId;
     for(;;){
       await new Promise(resolve=>setTimeout(resolve,500));
       const job=await fetch(`/api/run/${activeJob}`,{cache:"no-store"}).then(r=>r.json());
       if(job.error&&job.status!=="cancelled")throw Error(job.error);
-      if(job.status==="completed"){await openResultBundle(job.result.bundle);setStatus(`계산 완료 · ${job.runId}`);break;}
+      if(job.status==="completed"){if(algorithms){const latest=job.completedRuns.at(-1);const result=await fetch(`/api/result?runId=${encodeURIComponent(latest.runId)}`).then(r=>r.json());await openResultBundle(result.bundle);document.getElementById("btnCompare").click();setStatus(`비교 실행 완료 · ${job.completedRuns.length}개`);}else{await openResultBundle(job.result.bundle);setStatus(`계산 완료 · ${job.runId}`);}break;}
       if(job.status==="cancelled"){setStatus("계산을 중지했습니다. 이전 결과를 유지합니다.");break;}
       if(job.status==="failed")throw Error(job.error||"계산 실패");
-      const p=job.progress;setStatus(p?`계산 중 ${Math.round(p.progress*100)}% · ${p.time.toFixed(1)} / ${p.limit}s · 수신 ${p.received.toLocaleString()}`:"계산 준비 중…");
-      const progress=document.getElementById("runProgress");progress.hidden=false;progress.value=p?p.progress:0;
+      const p=job.progress;setStatus(p?`계산 중 ${job.completedRuns?.length||0} / ${job.totalRuns||1} · ${Math.round(p.progress*100)}% · ${p.time.toFixed(1)} / ${p.limit}s · 수신 ${p.received.toLocaleString()}`:"계산 준비 중…");
+      const progress=document.getElementById("runProgress");progress.hidden=false;progress.value=p?((job.completedRuns?.length||0)+p.progress)/(job.totalRuns||1):0;
     }
   }catch(error){setStatus(`실행 오류: ${error.message}`);}
-  finally {activeJob=null;btn.disabled=false;stop.hidden=true;document.getElementById("runProgress").hidden=true;}
-};
+  finally {activeJob=null;btn.disabled=false;compare.disabled=false;stop.hidden=true;document.getElementById("runProgress").hidden=true;}
+}
+document.getElementById("btnRunSim").onclick=()=>runNative();
 document.getElementById("btnStopSim").onclick=async()=>{if(activeJob){await fetch(`/api/run/${activeJob}/cancel`,{method:"POST"});setStatus("계산을 중지하는 중…");}};
 
 render();

@@ -8,7 +8,15 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
 (async () => {
   const port=20000+Math.floor(Math.random()*10000)*2;
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "florasat-browser-"));
-  const server = spawn("python", ["-c", `import server,http.server; http.server.ThreadingHTTPServer(('127.0.0.1',${port}),server.SimHandler).serve_forever()`], {cwd: __dirname, windowsHide:true, stdio:"ignore"});
+  const httpRoot=path.join(profile,"http");fs.mkdirSync(path.join(httpRoot,"data"),{recursive:true});
+  for(const file of ["index.html","app.js","editor.js","orbit.js","csv.js","bundle.js","style.css","data/earth.png"])fs.copyFileSync(path.join(__dirname,file),path.join(httpRoot,file));
+  fs.cpSync(path.join(__dirname,"settings"),path.join(httpRoot,"settings"),{recursive:true});
+  const referenceManifest=JSON.parse(fs.readFileSync(path.join(__dirname,"testdata/bundle/manifest.json"),"utf8")),referenceFiles={};
+  for(const file of Object.keys(referenceManifest.files))referenceFiles[file]=fs.readFileSync(path.join(__dirname,"testdata/bundle",file),"utf8");
+  const referenceResult={ok:true,runId:referenceManifest.runId,bundle:{manifest:referenceManifest,files:referenceFiles}};
+  const referenceFolder=path.join(httpRoot,"data/runs",referenceManifest.runId);fs.mkdirSync(referenceFolder,{recursive:true});
+  fs.writeFileSync(path.join(referenceFolder,"result.json"),JSON.stringify(referenceResult));fs.writeFileSync(path.join(httpRoot,"data/latest.json"),JSON.stringify({runId:referenceManifest.runId}));fs.writeFileSync(path.join(httpRoot,"data/latest_result.js"),"window.SIM_RESULT="+JSON.stringify(referenceResult)+";");
+  const server = spawn("python", ["-c", `import server,http.server,sys,os;server.BASE_DIR=sys.argv[1];server.LEO_DIR=os.path.join(server.BASE_DIR,'settings');server.INI_PATH=os.path.join(server.LEO_DIR,'simulations/Dijkstra132/omnetpp.ini');http.server.ThreadingHTTPServer(('127.0.0.1',${port}),server.SimHandler).serve_forever()`,httpRoot], {cwd: __dirname, windowsHide:true, stdio:"ignore"});
   const browser = spawn("C:/Program Files/Google/Chrome/Application/chrome.exe", ["--headless=new", "--disable-extensions", "--disable-background-networking", "--no-first-run", `--remote-debugging-port=${port+1}`, `--user-data-dir=${profile}`, "about:blank"], {windowsHide:true, stdio:"ignore"});
   let ws;
   try {
@@ -22,7 +30,7 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     const evaluate=async expression=> {const r=await send("Runtime.evaluate",{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
     await send("Runtime.enable");
     await send("Page.navigate",{url:`http://127.0.0.1:${port}`});
-    await retry(async()=> assert(await evaluate("typeof resultMeta !== 'undefined' && resultMeta?.replay === true")));
+    await retry(async()=> assert(await evaluate("typeof resultMeta !== 'undefined' && resultMeta?.replay === true"))).catch(async err=>{console.error('Startup state:',await evaluate("({status:document.getElementById('runStatus')?.textContent,meta:typeof resultMeta,loaded:!!window.SIM_RESULT})"),errors);throw err;});
     assert.equal(await evaluate("document.getElementById('scenarioDetails').open"),false);
     assert.equal(await evaluate("document.getElementById('iniTable').checkVisibility()"),false);
     assert.equal(await evaluate("document.getElementById('scenarioConstellation').textContent"),"132기 · 12개 궤도면");
@@ -83,18 +91,29 @@ async function retry(fn) { for (let i=0;i<60;i++) { try { return await fn(); } c
     const nativeResult=JSON.parse(fs.readFileSync(path.join(nativeFolder,'browser-result.json'),'utf8'));
     await evaluate(`openResultBundle(${JSON.stringify(nativeResult.bundle)})`);
     assert(await evaluate("!byId('nativeMetrics').hidden && byId('metricValues').children.length===8 && resultMeta.summary.received>0"));
+
+    assert(await evaluate("resultMeta.summary.metricVersion===3 && !!byId('researchMetrics')"));
+    await evaluate("byId('metricSeries').value='controlBytes';drawMetrics()");
+    const nativeJson=JSON.stringify(nativeResult);
+    await evaluate(`window.batchResult=${nativeJson};window.batchFetch=window.fetch;window.batchBody=null;window.fetch=async(url,options)=>{if(url==='/api/experiments'){window.batchBody=JSON.parse(options.body);return new Response(JSON.stringify({runId:'browser-experiment'}),{status:202});}if(url==='/api/run/browser-experiment')return new Response(JSON.stringify({status:'completed',completedRuns:[{runId:batchResult.runId},{runId:batchResult.runId}],result:{runs:[]}}));if(String(url).startsWith('/api/result?runId='))return new Response(JSON.stringify(batchResult));return batchFetch(url,options);};byId('btnExperiment').click();`);
+    await retry(async()=>assert(await evaluate("byId('experimentDialog').open")));
+    assert.equal(await evaluate("document.querySelectorAll('.experiment-algorithm').length"),5);
+    await evaluate("[...document.querySelectorAll('.experiment-algorithm')].forEach((e,i)=>e.checked=i<2);byId('experimentForm').requestSubmit(byId('experimentForm').querySelector('[type=submit]'))");
+    await retry(async()=>assert(await evaluate("window.batchBody?.algorithms.length===2 && byId('compareDialog').open")));
+    await evaluate("byId('compareDialog').close();window.fetch=window.batchFetch");
+
     await evaluate("showComparison(resultMeta,resultMeta)");
     assert(await evaluate("byId('comparisonStatus').textContent.includes('동일한 환경')"));
     assert.equal(await evaluate("lastSatStates.length"),132);
     await evaluate("(async()=>{await openResultBundle((await fetch('/api/result').then(r=>r.json())).bundle)})()");
     assert(await evaluate("byId('nativeMetrics').hidden === !resultMeta.summary"));
     assert.equal(errors.length,0,JSON.stringify(errors));
-    console.log('Native UI passed: 100-node settings, rate/interval coupling, region editor, responsive dialog, MCSR controls, v2 replay, measured metrics and comparison');
+    console.log('Native UI passed: 100-node settings, rate/interval coupling, region editor, responsive dialog, MCSR controls, v3 replay, offered-load metrics, control chart, experiment runner and comparison');
 
     const offline = path.join(profile, "offline");
     fs.mkdirSync(path.join(offline, "data"), {recursive:true});
     for (const file of ["index.html", "app.js","editor.js", "orbit.js", "csv.js", "bundle.js", "style.css", "data/latest_result.js", "data/earth.png"])
-      fs.copyFileSync(path.join(__dirname,file),path.join(offline,file));
+      fs.copyFileSync(path.join(httpRoot,file),path.join(offline,file));
     await send("Page.navigate", {url: require("node:url").pathToFileURL(path.join(offline, "index.html")).href});
     await retry(async()=> assert(await evaluate("location.protocol === 'file:' && typeof resultMeta !== 'undefined' && resultMeta?.replay === true")));
     assert.equal(await evaluate("document.getElementById('cfgName').checkVisibility()"),false);

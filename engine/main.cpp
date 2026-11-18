@@ -11,6 +11,23 @@
 #include <sstream>
 #include <regex>
 #include <chrono>
+#include "control.h"
+double zoneCoefficient(const leocongestion::Zone &z,int id,double lat,double lon) {
+  if(z.shape!=leocongestion::Zone::Box||std::abs(z.lonMax-z.lonMin)<360.-1e-9)return leocongestion::coefficient(z,id,lat,lon);
+  if(lat<z.latMin||lat>z.latMax)return 0;
+  double half=(z.latMax-z.latMin)/2,centre=(z.latMax+z.latMin)/2;
+  double r=std::max(half>0?std::abs(lat-centre)/half:0.,std::abs(leocongestion::normLon(lon))/180.);
+  return 1-(1-z.edgeFraction)*std::min(1.,r);
+}
+leocongestion::LinkLoadMap zoneLoads(const std::vector<leocongestion::Zone> &zones,double time,const std::vector<std::pair<int,int>> &links,const leocongestion::PositionFn &position,const leocongestion::QueueModel &q) {
+  using namespace leocongestion;std::vector<Zone> ordinary,world;
+  for(auto &z:zones)(z.shape==Zone::Box&&std::abs(z.lonMax-z.lonMin)>=360.-1e-9?world:ordinary).push_back(z);
+  auto out=computeLinkLoads(ordinary,time,links,position,q);
+  for(auto &z:world)if(z.activeAt(time)&&z.rho>0){std::map<int,double> factors;auto factor=[&](int id){if(!factors.count(id)){double lat=0,lon=0;factors[id]=position(id,lat,lon)?zoneCoefficient(z,id,lat,lon):0;}return factors[id];};
+    for(auto [a,b]:links)for(auto [u,v]:{std::make_pair(a,b),std::make_pair(b,a)}){double cu=factor(u),cv=factor(v),k=z.dir==Direction::Out?cu:z.dir==Direction::In?cv:z.rule==LinkRule::Any?std::max(cu,cv):std::min(cu,cv),rho=z.rho*k;if(rho<=0)continue;
+      auto &l=out[{u,v}];l.rho=std::max(l.rho,rho);l.extraDelay=std::max(l.extraDelay,q.delay(rho)+z.penaltyDelayMs/1000.);l.jitter=std::max(l.jitter,std::hypot(q.jitter(rho),z.penaltyJitterMs/1000.));}}
+  return out;
+}
 using Tick = long long;
 constexpr double TICKS = 1e11;
 Tick ticks(double seconds) { return llround(seconds*TICKS); }
@@ -24,15 +41,24 @@ struct Packet {
   long long id=0; int source=0,dest=0,hops=0,current=0; Tick created=0;
   int bytes=0; Plan plan; size_t cursor=0; double plannedAt=0;
   mcsr::FailureSet excluded;
+  ControlPlane::Msg control;int ttl=0;Tick enqueued=0;unsigned long long pass=0;std::vector<std::pair<unsigned long long,unsigned>> visits;
 };
 struct Context {
   J c; int n,g; double now=0; long epoch=0,islEpoch=0,congestionEpoch=0;
+  mcsr::OpCounts operations;
+  std::map<std::string,double> computeMs;std::map<std::string,long long> computations;
+  std::function<unsigned long long(int)> revision,topologyRevision;
   std::function<mcsr::Graph(int)> graph;
   std::function<std::vector<mcsr::Planner::Exit>(int)> exits;
   std::function<std::vector<std::pair<int,double>>(int)> uplinks;
   std::function<mcsr::FailureSet(int)> failures;
   std::function<void(double,std::function<void()>)> schedule;
   std::function<void(J)> record;
+};
+struct ComputeTimer {
+  Context &c;std::string kind;std::chrono::steady_clock::time_point start=std::chrono::steady_clock::now();
+  ComputeTimer(Context &ctx,std::string name):c(ctx),kind(std::move(name)){c.computations[kind]++;}
+  ~ComputeTimer(){c.computeMs[kind]+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}
 };
 class Routing {
 public:
@@ -50,13 +76,15 @@ class DijkstraRouting:public Routing {
     if(stamp!=x.epoch) { cache.clear();stamp=x.epoch; }
     auto failures=x.failures(viewer); failures.links.insert(extra.links.begin(),extra.links.end()); unsigned long long hash=0;
     for(auto k:failures.links) hash^=k*11400714819323198485ull;
-    auto key=std::make_pair(dest,hash);
+    auto key=std::make_pair(dest,hash^(x.revision?x.revision(viewer):0));
     if(!cache.count(key)) {
+      ComputeTimer measure(x,"dijkstra-tree");MCSR_OP(computations,1);MCSR_OP(planMiss,1);
       auto graph=x.graph(viewer);std::vector<std::vector<Edge>> a(x.n+1);
       for(int u=0;u<x.n;u++) for(auto e:graph.adj[u])if(!failures.blocksLink(u,e.to))a[u].push_back({e.to,e.t.D/1000});
       for(auto e:x.exits(dest)) { a[e.sat].push_back({x.n,e.gsl.D/1000});a[x.n].push_back({e.sat,e.gsl.D/1000}); }
       cache.emplace(key,dijkstra(a,x.n,hop));
     }
+    else {MCSR_OP(planHit,1);}
     return cache.at(key);
   }
 public:
@@ -87,16 +115,30 @@ class McsrRouting:public Routing {
   int K=0,L=0;double sampled=-1;long epoch=-1,congestionEpoch=-1;
   std::map<std::tuple<const Planner*,int,int>,Plan> plans;
   long groundEpoch=-1;
-  std::shared_ptr<Planner> build() {
+  std::map<std::pair<unsigned long long,long long>,std::shared_ptr<Planner>> delivered;
+  struct LocalView {std::weak_ptr<Planner> planner;unsigned long long topology=0;long geometry=-1;double sampled=-1;};
+  std::map<int,LocalView> localViews;
+  std::shared_ptr<Planner> build(int viewer=-2) {
+    ComputeTimer measure(x,"mcsr-snapshot");MCSR_OP(computations,1);
     mcsr::PlannerConfig c;c.planes=x.c["planes"];c.satsPerPlane=x.n/c.planes;c.interPlaneSpacing=x.c["phasing"];
     c.labelCap=x.c.value("labelCap",32);c.fixedK=K;c.fixedL=L;
     if(x.c.value("floodModel",std::string("paper"))=="consistent")c.flood=mcsr::FloodModel::Consistent;
-    auto p=std::shared_ptr<Planner>(Planner::create(c,x.graph(-2)).release());
+    auto p=std::shared_ptr<Planner>(Planner::create(c,x.graph(viewer)).release());
     if(!K){K=p->srdPlan().K;L=p->srdPlan().L;}
     sampled=x.now;epoch=x.c.value("snapshotOnDelayUpdate",true)?x.epoch:x.islEpoch;congestionEpoch=x.congestionEpoch;
     current=p;plans.clear();return p;
   }
   std::shared_ptr<Planner> view(int node) {
+    if(x.c.value("controlMode",std::string("packet"))=="packet") {
+      double refresh=x.c.value("refreshInterval",0.);auto topology=x.topologyRevision(node);
+      auto &local=localViews[node];bool geometry=x.c.value("snapshotOnDelayUpdate",true)&&local.geometry!=x.epoch;
+      if(local.topology==topology&&!geometry&&(refresh<=0||x.now-local.sampled<refresh-1e-10))if(auto p=local.planner.lock())return p;
+      long long sample=x.c.value("snapshotOnDelayUpdate",true)?x.epoch:refresh>0?static_cast<long long>(x.now/refresh):0;
+      auto key=std::make_pair(x.revision(node),sample);auto at=delivered.find(key);std::shared_ptr<Planner> p;
+      if(at!=delivered.end())p=at->second;
+      else {p=build(node);if(delivered.size()>=64){delivered.clear();plans.clear();}delivered[key]=p;}
+      local={p,topology,x.epoch,x.now};return p;
+    }
     if(csib) {auto v=csib->viewAt(node,x.now);return snapshots.at(v?v->dataTime:0);}
     long e=x.c.value("snapshotOnDelayUpdate",true)?x.epoch:x.islEpoch;
     double interval=x.c.value("refreshInterval",0.);
@@ -125,10 +167,10 @@ public:
     auto id=x.c.value("algorithm",std::string("mcsr-ls"));service=id=="mcsr-ts"?mcsr::Service::TS:id=="mcsr-hr"?mcsr::Service::HR:mcsr::Service::LS;
     selection.hrJitterMs=x.c.value("hrJitterMs",15.);double bound=x.c.value("tsDelayBoundMs",-1.);if(bound>=0)selection.tsDelayBoundMs=bound;
     K=x.c.value("srdK",0);L=x.c.value("srdL",0);auto p=build();
-    if(x.c.value("csibEnabled",false)) {
+    if(x.c.value("csibEnabled",false)&&x.c.value("controlMode",std::string("packet"))=="time") {
       fixedPlan=std::make_unique<mcsr::SrdPlan>(p->srdPlan());mcsr::CsibParams cp;
-      cp.periodSec=x.c.value("csibPeriod",180.);cp.computeMs=1000*x.c.value("csibComputeDelay",0.);
-      cp.reportProcMs=1000*x.c.value("csibReportProcDelay",0.);cp.hopProcMs=1000*x.c.value("csibHopProcDelay",0.);
+      cp.periodSec=x.c.value("csibPeriod",180.);cp.computeMs=x.c.value("processingMode",std::string("neutral"))=="neutral"?0:1000*x.c.value("csibComputeDelay",0.);
+      cp.reportProcMs=x.c.value("processingMode",std::string("neutral"))=="neutral"?0:1000*x.c.value("csibReportProcDelay",0.);cp.hopProcMs=x.c.value("processingMode",std::string("neutral"))=="neutral"?0:1000*x.c.value("csibHopProcDelay",0.);
       cp.messageBytes=x.c.value("csibMessageBytes",0);cp.islBitsPerSecond=x.c.value("islDatarate",1e8);cp.useVote=x.c.value("csibVote",true);
       double d=x.c.value("csibDetectDelay",-1.);if(d<0)d=x.c.value("slsInterval",.2)*x.c.value("slsMissCount",3);
       cp.detectMs=1000*d;csib=std::make_unique<mcsr::CsibModel>(*fixedPlan,cp);
@@ -149,6 +191,7 @@ public:
   }
   bool sourceRouted() const override {return true;}
   Plan forward(Packet &packet,int node,bool repair=false) override {
+    ComputeTimer measure(x,repair?"mcsr-repair":"mcsr-plan");
     auto p=view(node);auto f=x.failures(node);
     f.links.insert(packet.excluded.links.begin(),packet.excluded.links.end());
     if(repair && x.c.value("reservedPaths",false) && packet.plan.front) {
@@ -165,16 +208,18 @@ public:
         }
         if(valid){path.t=tuple;candidates.push_back(std::move(path));}
       }
-      if(auto best=mcsr::selectPath(candidates,service,selection))return {best->sats,best->t.D/1000,sampled,true,packet.plan.front};
+      if(auto best=mcsr::selectPath(candidates,service,selection)){MCSR_OP(reserveSwitches,1);return {best->sats,best->t.D/1000,sampled,true,packet.plan.front};}
     }
     if(groundEpoch!=x.epoch){plans.clear();groundEpoch=x.epoch;}
     auto key=std::make_tuple(p.get(),node,packet.dest);
-    if(!repair && f.empty() && plans.count(key))return plans.at(key);
+    if(!repair && f.empty() && plans.count(key)){MCSR_OP(planHit,1);return plans.at(key);}
+    MCSR_OP(planMiss,1);if(repair)MCSR_OP(recomputes,1);
     auto result=p->plan(node,x.exits(packet.dest),service,&f,selection);Plan out;
-    if(result.ok){out.path=result.path.sats;out.delay=result.path.t.D/1000;out.front=result.front;out.dataTime=csib?csib->viewAt(node,x.now)->dataTime:sampled;}
+    if(result.ok){out.path=result.path.sats;out.delay=result.path.t.D/1000;out.front=result.front;out.dataTime=csib?csib->viewAt(node,x.now)->dataTime:x.now;}
     if(!repair && f.empty())plans[key]=out;return out;
   }
   int selectUplink(int src,int dst) override {
+    ComputeTimer measure(x,"mcsr-access");
     int best=-1;double cost=INFINITY;
     for(auto [sat,up]:x.uplinks(src)) {
       Packet p;p.source=src;p.dest=dst;auto planner=view(sat);auto f=x.failures(sat);
@@ -195,15 +240,18 @@ std::map<std::string,RoutingFactory> routingFactories() {
 }
 
 struct FlowStats {
+  long long sourceDropped=0;
   long long attempted=0,sent=0,received=0,dropped=0,bytes=0,queued=0;
   double delaySum=0,mean=0,m2=0,maxDelay=0,jitter=0,lastTransit=-1,lastRx=-1,maxGap=0;
-  long long hops=0,outages=0,lastSent=0,lastReceived=0,lastDropped=0,lastBytes=0;
+  long long hops=0,outages=0,lastSent=0,lastReceived=0,lastDropped=0,lastBytes=0,lastSourceDropped=0;
   double lastDelaySum=0;
 };
 struct Link {
   int a=0,b=0; bool active=false,nominal=false,transmitting=false;
   double prop=0,previousProp=0,rate=0,extra=0,extraJ=0,rho=0,availability=1,loss=0,capacityScale=1;
   double lastArrival=-1,lastInterval=-1,jitter=0,jitterAt=-1;
+  unsigned long long generation=0;std::shared_ptr<Packet> current;Tick txStarted=0;double wireDuration=0;
+  double lastTransit=-1;
   std::deque<std::shared_ptr<Packet>> queue;
 };
 struct Failure {int count=0;double since=0;std::vector<double> known;};
@@ -222,13 +270,17 @@ class Simulation {
   std::map<mcsr::LinkKey,Failure> failures;
   std::map<std::pair<int,int>,FlowStats> flows;
   std::map<std::pair<int,int>,std::vector<int>> lastPaths;
-  std::vector<int> lastRoute,srdOf;
+  std::vector<int> srdOf;int initialK=0,initialL=0;
   std::set<mcsr::LinkKey> syntheticFailures;
   double congestionSampled=-1;
   std::vector<leocongestion::Zone> zones;
-  std::ofstream csv,trace,network,series,failureLog;
+  std::ofstream csv,trace,network,series,failureLog,controlSeries;
   Context context;
   std::unique_ptr<Routing> router;
+  std::unique_ptr<ControlPlane> control;
+  std::vector<J> physicalEvents;
+  struct Recovery {double time;int a,b;bool up;std::map<std::pair<int,int>,double> flows;std::set<std::pair<int,int>> affected;std::vector<double> applied;double detected=INFINITY,until=INFINITY;};
+  std::vector<Recovery> recovery;
   double seconds()const{return now/TICKS;}
   double random(){return double(trafficRng())/4294967296.;}
   void schedule(double t,std::function<void()> fn) {
@@ -236,8 +288,11 @@ class Simulation {
     Tick tick=ticks(t);if(tick<limit)events.push({tick,sequence++,std::move(fn)});
   }
   void record(J e) {
+    if(control && e.value("event",std::string())=="knowledge-applied") {int node=e["node"];for(auto &event:recovery)if(seconds()<=event.until&&!std::isfinite(event.applied[node])&&control->matches(node,event.a,event.b,event.up,event.time))event.applied[node]=seconds();}
+    if(e.value("event",std::string())=="link-detected")for(auto &event:recovery)if(seconds()<=event.until&&e["up"]==event.up&&seconds()>=event.time&&((e["a"]==event.a&&e["b"]==event.b)||(e["b"]==event.a&&e["a"]==event.b)))event.detected=std::min(event.detected,seconds());
+    if(e.value("event",std::string())=="knowledge-applied")return;
     e["time"]=seconds();network<<e.dump()<<'\n';
-    if(e.value("event",std::string())=="srd")srdOf=e["srdOf"].get<std::vector<int>>();
+    if(e.value("event",std::string())=="srd"){srdOf=e["srdOf"].get<std::vector<int>>();initialK=e["K"];initialL=e["L"];}
   }
   Link *find(int a,int b) {
     if(a<0||a>=n+g)return nullptr;auto at=links[a].find(b);return at==links[a].end()?nullptr:&at->second;
@@ -249,6 +304,7 @@ class Simulation {
   }
   mcsr::FailureSet knownFailures(int viewer) {
     mcsr::FailureSet f;
+    if(control&&viewer>=0)return control->views.at(viewer).down;
     for(auto &[key,state]:failures)if(state.count && seconds()+1e-10>=knownAt(state,viewer))f.links.insert(key);
     return f;
   }
@@ -256,12 +312,13 @@ class Simulation {
     mcsr::Graph result(n);auto f=knownFailures(viewer);
     bool mc=c["algorithm"].get<std::string>().find("mcsr")==0;
     for(int u=0;u<n;u++)for(auto &[v,l]:links[u])if(v<n && l.nominal && (l.active || failures.count(mcsr::linkKey(u,v))) && !f.blocksLink(u,v)) {
+      if(control&&viewer>=0){auto r=control->perceived(viewer,u,v);if(!r.up)continue;result.addDirected(u,v,{1000*(l.prop+((mc||c.value("congestionAware",false))?r.extra:0.)),r.A,r.J});continue;}
       int cap=c.value("queueCapacity",500);if(cap==0)cap=c.value("routingQueueCapacity",100);
       double a=std::max(0.,1-double(l.queue.size())/cap);a=std::min(a,l.availability);
       double j=seconds()-l.jitterAt<=c.value("jitterWindow",30.)?l.jitter:0;
       if(c.value("jitterSource",std::string("arrival"))=="delayChange")j=std::abs(l.prop-l.previousProp);
-      double d=l.prop+((mc||c.value("congestionAware",false))?l.extra:0.);
-      result.addDirected(u,v,{1000*d,a,1000*std::hypot(j,l.extraJ)});
+      double d=l.prop+((mc||c.value("congestionAware",false))?(l.extra+(c.value("jitterModel",std::string("packet"))=="packet"?std::sqrt(3.)*l.extraJ:0.)):0.);
+      result.addDirected(u,v,{1000*d,a,1000*(c.value("jitterModel",std::string("packet"))=="cost"?std::hypot(j,l.extraJ):j)});
     }
     return result;
   }
@@ -279,7 +336,7 @@ class Simulation {
     auto &l=links[a][b];l.a=a;l.b=b;l.previousProp=l.prop;l.prop=delay;l.rate=rate*l.capacityScale;l.nominal=nominal;
     auto at=failures.find(mcsr::linkKey(a,b));l.active=nominal && (a>=n||b>=n||at==failures.end()||!at->second.count);
   }
-  void update() {
+  void update(bool reschedule=true) {
     double t=seconds();
     for(int i=0;i<n;i++)orbits[i]->getPosition((gap+t)/60,&sat[i]);
     for(int i=0;i<g;i++)ground[i]=station(c["stations"][i],t);
@@ -309,9 +366,9 @@ class Simulation {
         linkState(n+i,j,d,c.value("groundlinkDatarate",5e7));linkState(j,n+i,d,c.value("groundlinkDatarate",5e7));
       }
     }
-    for(int u=0;u<n+g;u++)for(auto &[v,l]:links[u])if((u>=n||v>=n)&&!l.active)clearQueue(l,"link-down-in-queue");
+    for(int u=0;u<n+g;u++)for(auto &[v,l]:links[u])if((u>=n||v>=n)&&!l.active){clearQueue(l,"link-down-in-queue");abort(l);}
     context.epoch++;context.now=t;applyCongestion(false);
-    schedule(t+c.value("updateInterval",1.),[this]{update();});
+    if(reschedule)schedule(t+c.value("updateInterval",1.),[this]{update();});
   }
   double coefficient(const J &target,int id) {
     auto kind=target.value("kind",std::string());auto p=target.value("params",J::object());
@@ -327,7 +384,7 @@ class Simulation {
       if(p.value("shape",std::string("rect"))=="circle") {z.shape=leocongestion::Zone::Circle;z.lat=p.value("center_lat",0.);z.lon=p.value("center_lon",0.);z.radiusKm=p.value("radius_km",1.);}
       else {z.shape=leocongestion::Zone::Box;z.latMin=p.value("lat_min",-90.);z.latMax=p.value("lat_max",90.);z.lonMin=p.value("lon_min",-180.);z.lonMax=p.value("lon_max",180.);}
       z.edgeFraction=p.value("profile",std::string("uniform"))=="hotspot"?p.value("edge_pct",20.)/100:1.;
-      return leocongestion::coefficient(z,id,pos.m_Lat/RADS_PER_DEG,pos.m_Lon/RADS_PER_DEG);
+      return zoneCoefficient(z,id,pos.m_Lat/RADS_PER_DEG,pos.m_Lon/RADS_PER_DEG);
     }
     return 0;
   }
@@ -352,7 +409,7 @@ class Simulation {
     bool environment=c.value("congestionMode",std::string("actual"))=="environment";
     leocongestion::QueueModel q;q.packetBytes=c.value("congestionPacketBytes",1380);q.capacityPackets=c.value("congestionBuffer",500);q.islDatarate=c.value("islDatarate",1e8);
     auto position=[this](int id,double &lat,double &lon){auto p=sat[id].toGeo();lat=p.m_Lat/RADS_PER_DEG;lon=p.m_Lon/RADS_PER_DEG;return true;};
-    auto loads=environment?leocongestion::computeLinkLoads(zones,seconds(),nominalIsls,position,q):leocongestion::LinkLoadMap{};
+    auto loads=environment?zoneLoads(zones,seconds(),nominalIsls,position,q):leocongestion::LinkLoadMap{};
     auto entries=c.value("scenario",J::object()).value("entries",J::array());
     for(int a=0;a<n;a++)for(auto &[b,l]:links[a])if(b<n) {
       double rho=0,extra=0,jitter=0,available=1,scale=1,loss=0;bool fail=false;
@@ -375,6 +432,7 @@ class Simulation {
       if(changed){context.congestionEpoch++;record({{"event","congestion"},{"a",a},{"b",b},{"rho",rho},{"delay",extra},{"jitter",jitter},{"loss",loss},{"capacityScale",scale},{"availability",available}});}
       if(fail)newFailures.insert(mcsr::linkKey(a,b));
     }
+    if(c.value("physicalPrepared",false))return;
     for(auto key:newFailures)if(!syntheticFailures.count(key))fail(int(key>>32),int(key));
     for(auto key:syntheticFailures)if(!newFailures.count(key))fail(int(key>>32),int(key),true);
     syntheticFailures=std::move(newFailures);
@@ -384,48 +442,58 @@ class Simulation {
     if(c.value("packetTrace",false))trace<<seconds()<<','<<event<<','<<p->source<<','<<p->dest<<','<<detail<<','<<p->id<<','<<p->hops<<'\n';
   }
   FlowStats &flow(const std::shared_ptr<Packet> &p){return flows[{p->source,p->dest}];}
-  void drop(const std::shared_ptr<Packet> &p,const std::string &reason) {flow(p).dropped++;dropReasons[reason]++;tracePacket(p,"drop",reason);}
+  void drop(const std::shared_ptr<Packet> &p,const std::string &reason) {if(p->control){if(control){control->dropped++;control->droppedByReason[reason]++;}return;}flow(p).dropped++;dropReasons[reason]++;tracePacket(p,"drop",reason);}
   std::map<std::string,long long> dropReasons;
-  void clearQueue(Link &l,const std::string &reason) {while(!l.queue.empty()){auto p=l.queue.front();l.queue.pop_front();flow(p).queued--;drop(p,reason);}}
+  void clearQueue(Link &l,const std::string &reason) {while(!l.queue.empty()){auto p=l.queue.front();l.queue.pop_front();if(!p->control)flow(p).queued--;drop(p,reason);}}
+  double uniform(const Packet &p,const Link &l,unsigned salt) {
+    std::seed_seq seed{unsigned(c.value("seed",0)),unsigned(p.id),unsigned(p.id>>32),unsigned(l.a),unsigned(l.b),unsigned(p.pass),salt};std::mt19937 rng(seed);return double(rng())/4294967296.;
+  }
   void start(Link &l,const std::shared_ptr<Packet> &p) {
     if(!l.active){drop(p,"link-down");return;}
-    if(l.loss>0) {
-      std::seed_seq seed{unsigned(c.value("seed",0)),unsigned(p->id),unsigned(p->id>>32),unsigned(l.a),unsigned(l.b),0x4c4f5353u};std::mt19937 rng(seed);
-      if(double(rng())/4294967296.<l.loss){drop(p,"injected-loss");return;}
-    }
-    l.transmitting=true;int a=l.a,b=l.b;double delay=l.prop+l.extra;
-    Tick duration=std::max<Tick>(1,ticks((p->bytes+24)*8/l.rate));
-    schedule((now+duration)/TICKS,[this,p,a,b,delay]{
-      auto &l=links[a].at(b);l.transmitting=false;
-      schedule(seconds()+delay,[this,p,a,b]{arrive(p,b,a);});
-      if(!l.active)clearQueue(l,"link-down-in-queue");
-      drain(l);
+    if(l.loss>0||l.extraJ>0){auto key=(static_cast<unsigned long long>(l.a)<<32)|unsigned(l.b);auto at=std::find_if(p->visits.begin(),p->visits.end(),[&](auto v){return v.first==key;});if(at==p->visits.end()){p->visits.push_back({key,1});p->pass=1;}else p->pass=++at->second;}
+    l.transmitting=true;l.current=p;l.txStarted=now;auto generation=++l.generation;int a=l.a,b=l.b;
+    double delay=l.prop+l.extra;if(c.value("jitterModel",std::string("packet"))=="packet"&&l.extraJ>0)delay+=uniform(*p,l,0x4a495454u)*2*std::sqrt(3.)*l.extraJ;
+    bool lost=l.loss>0&&uniform(*p,l,0x4c4f5353u)<l.loss;
+    Tick duration=std::max<Tick>(1,ticks((p->bytes+24)*8/l.rate));l.wireDuration=duration/TICKS;
+    schedule((now+duration)/TICKS,[this,p,a,b,delay,generation,lost]{
+      auto &l=links[a].at(b);if(l.generation!=generation)return;
+      if(p->control&&control){control->wireBytes+=p->bytes+24;control->busySeconds+=l.wireDuration;}
+      l.transmitting=false;l.current.reset();
+      schedule(seconds()+delay,[this,p,a,b,lost]{if(lost)drop(p,"injected-loss");else arrive(p,b,a);});
+      if(!l.active)clearQueue(l,"link-down-in-queue");drain(l);
     });
   }
+  void abort(Link &l) {
+    if(!l.current)return;
+    auto p=l.current;if(p->control&&control){double busy=seconds()-l.txStarted/TICKS;control->busySeconds+=busy;control->wireBytes+=static_cast<long long>(busy*l.rate/8);}
+    l.generation++;l.transmitting=false;l.current.reset();drop(p,"link-down-in-transmission");
+  }
   void drain(Link &l) {
-    while(!l.transmitting&&!l.queue.empty()){auto next=l.queue.front();l.queue.pop_front();flow(next).queued--;start(l,next);}
+    while(!l.transmitting&&!l.queue.empty()){auto next=l.queue.front();l.queue.pop_front();if(!next->control)flow(next).queued--;start(l,next);}
   }
   void transmit(const std::shared_ptr<Packet> &p,int a,int b) {
+    p->enqueued=now;if(p->control&&control)control->hopAccepted++;
     auto l=find(a,b);if(!l||!l->active){drop(p,"link-down");return;}
     if(!l->transmitting&&l->queue.empty()){start(*l,p);return;}
     int cap=c.value("queueCapacity",500);
     if(cap && l->queue.size()>=size_t(cap)){drop(p,"queue-overflow");return;}
-    l->queue.push_back(p);flow(p).queued++;maxQueue=std::max(maxQueue,(long long)l->queue.size());
+    l->queue.push_back(p);if(!p->control)flow(p).queued++;maxQueue=std::max(maxQueue,(long long)l->queue.size());
   }
   void writeRoute(const std::shared_ptr<Packet> &p,int node) {
     if(p->plan.path.empty())return;auto key=std::make_pair(p->source,p->dest);
     bool write=c.value("routeRecording",std::string("full"))=="full"||lastPaths[key]!=p->plan.path;
-    lastPaths[key]=p->plan.path;lastRoute=p->plan.path;
+    lastPaths[key]=p->plan.path;
     if(!write)return;
     double up=0;if(auto l=find(n+p->source,node))up=l->prop;
     csv<<seconds()<<','<<++routeId<<",GS"<<p->source<<','<<p->dest<<','<<p->plan.path.front()<<','<<p->plan.path.back()<<','<<p->plan.path.size()-1<<','<<up*1000<<','<<p->plan.delay*1000<<','<<(up+p->plan.delay)*1000<<',';
     for(size_t i=0;i<p->plan.path.size();i++)csv<<(i?"-":"")<<p->plan.path[i];csv<<'\n';
     tracePacket(p,"route",std::to_string(routeId));
   }
+  Plan measuredForward(Packet &p,int node,bool repair=false){ComputeTimer measure(context,repair?"repair":"plan");return router->forward(p,node,repair);}
   void dispatch(const std::shared_ptr<Packet> &p,int node,bool afterRepair=false) {
     if(router->sourceRouted()&&!p->plan.path.empty()&&seconds()-p->plannedAt>c.value("flowTimeout",120.)){p->plan=Plan{};p->cursor=0;}
     bool first=p->plan.path.empty();
-    if(!router->sourceRouted()||first) {p->plan=router->forward(*p,node);p->plannedAt=seconds();p->cursor=0;}
+    if(!router->sourceRouted()||first) {p->plan=measuredForward(*p,node);p->plannedAt=seconds();p->cursor=0;}
     if(p->plan.path.empty()){drop(p,"no-route");return;}
     if(first)writeRoute(p,node);
     if(router->sourceRouted()) {
@@ -436,24 +504,28 @@ class Simulation {
     auto l=find(node,next);
     if(!l||!l->active) {
       if(afterRepair){drop(p,"no-route");return;}
+      if(control && next<n && !knownFailures(node).blocksLink(node,next)){transmit(p,node,next);return;}
       if(next<n)p->excluded.links.insert(mcsr::linkKey(node,next));
-      auto plan=router->forward(*p,node,true);if(plan.path.empty()){drop(p,"no-route");return;}
+      auto plan=measuredForward(*p,node,true);if(plan.path.empty()){drop(p,"no-route");return;}
       replanned++;if(plan.reserved)reserved++;
-      double delay=router->sourceRouted()?(plan.reserved?c.value("reserveDelay",.001):c.value("repairDelay",.005)):c.value("spfDelay",.05);
+      double delay=c.value("processingMode",std::string("neutral"))=="neutral"?0:router->sourceRouted()?(plan.reserved?c.value("reserveDelay",.001):c.value("repairDelay",.005)):c.value("spfDelay",.05);
       p->plan=std::move(plan);p->plannedAt=seconds();p->cursor=0;writeRoute(p,node);
       schedule(seconds()+delay,[this,p,node]{dispatch(p,node,true);});return;
     }
     transmit(p,node,next);
   }
   void arrive(const std::shared_ptr<Packet> &p,int node,int from) {
+    if(from<n&&node<n){auto l=find(from,node);if(l){double transit=seconds()-p->enqueued/TICKS;if(l->lastTransit>=0)l->jitter+=(std::abs(transit-l->lastTransit)-l->jitter)/16.;l->lastTransit=transit;l->jitterAt=seconds();}}
+    if(p->control){control->arrived++;double proc=0;if(c.value("processingMode",std::string("neutral"))=="assumed")proc=c.value((p->control->kind=="report"||p->control->kind=="vote")?"csibReportProcDelay":p->control->kind=="lsa"?"floodHopDelay":"csibHopProcDelay",0.);
+      if(proc>0)schedule(seconds()+proc,[this,p,node,from]{control->receive(node,from,p->control,p->ttl);});else control->receive(node,from,p->control,p->ttl);return;}
     if(node>=n) {
       auto &f=flow(p);f.received++;f.bytes+=p->bytes;double d=seconds()-p->created/TICKS;
       f.delaySum+=d;double delta=d-f.mean;f.mean+=delta/f.received;f.m2+=delta*(d-f.mean);f.maxDelay=std::max(f.maxDelay,d);f.hops+=std::max(0,p->hops-1);
       if(f.lastTransit>=0)f.jitter+=(std::abs(d-f.lastTransit)-f.jitter)/16.;f.lastTransit=d;
       if(f.lastRx>=0){double gap=seconds()-f.lastRx;f.maxGap=std::max(f.maxGap,gap);if(gap>c["stations"][p->dest].value("gapThreshold",.1))f.outages++;}f.lastRx=seconds();
+      for(auto &e:recovery)if(p->created/TICKS>=e.time&&e.flows.count({p->source,p->dest})&&!std::isfinite(e.flows.at({p->source,p->dest})))e.flows[{p->source,p->dest}]=seconds();
       tracePacket(p,"receive",std::to_string(d));return;
     }
-    if(from<n) {auto l=find(from,node);if(l){if(l->lastArrival>=0){double interval=seconds()-l->lastArrival;if(l->lastInterval>=0)l->jitter+=(std::abs(interval-l->lastInterval)-l->jitter)/16.;l->lastInterval=interval;}l->lastArrival=seconds();l->jitterAt=seconds();}}
     p->current=node;if(++p->hops>c.value("maxHops",64)){drop(p,"max-hops");return;}dispatch(p,node);
   }
   void hashValue(unsigned long long value){for(int i=0;i<8;i++){trafficHash^=value&255;trafficHash*=1099511628211ull;value>>=8;}}
@@ -466,14 +538,14 @@ class Simulation {
     }
     auto &f=flows[{source,dest}];f.attempted++;long long id=++packetId;
     for(auto v:{(unsigned long long)id,(unsigned long long)now,(unsigned long long)source,(unsigned long long)dest,(unsigned long long)s["packetSize"].get<int>()})hashValue(v);
-    int best=dest<0?-1:router->selectUplink(source,dest);
-    if(best<0)noUplink++;
+    int best;{ComputeTimer measure(context,"access");best=dest<0?-1:router->selectUplink(source,dest);}
+    if(best<0){noUplink++;f.sourceDropped++;dropReasons[dest<0?"no-destination":uplinks(source).empty()?"no-access":"no-route-at-source"]++;}
     else {f.sent++;auto p=std::make_shared<Packet>();p->id=id;p->source=source;p->dest=dest;p->bytes=s["packetSize"];p->created=now;tracePacket(p,"send",std::to_string(p->bytes));transmit(p,n+source,best);}
     Tick next=now+ticks(s["sendInterval"].get<double>());
     if(next<=now)throw std::runtime_error("Traffic interval is below time resolution");
     if(next<limit&&next<ticks(s.value("endTime",limit/TICKS)))schedule(next/TICKS,[this,source]{send(source);});
   }
-  void fail(int a,int b,bool restore=false) {
+  void fail(int a,int b,bool restore=false,std::string cause="failure") {
     if(a<0||b<0||a>=n||b>=n||!find(a,b))throw std::runtime_error("Failure target is not an ISL");
     auto &f=failures[mcsr::linkKey(a,b)];
     if(restore){if(f.count>0)--f.count;if(f.count)return;}
@@ -485,16 +557,21 @@ class Simulation {
         for(int i=0;i<n;i++)f.known[i]=(distances[i]<0||(scope>0&&distances[i]>scope))?INFINITY:seconds()+detect+distances[i]*per;
       }
     }
-    for(auto [u,v]:{std::make_pair(a,b),std::make_pair(b,a)}){auto &l=links[u].at(v);l.active=restore&&l.nominal;if(!restore)clearQueue(l,"link-down-in-queue");}
-    context.islEpoch++;context.epoch++;record({{"event",restore?"restore":"failure"},{"a",a},{"b",b}});
-    failureLog<<seconds()<<','<<(restore?"restore":"fail")<<','<<a<<','<<b<<'\n';
-    if(router) {
+    for(auto [u,v]:{std::make_pair(a,b),std::make_pair(b,a)}){auto &l=links[u].at(v);l.active=restore&&l.nominal;if(!restore){clearQueue(l,"link-down-in-queue");abort(l);}}
+    context.islEpoch++;if(!control)context.epoch++;record({{"event",restore?"restore":"failure"},{"a",a},{"b",b},{"cause",cause}});
+    physicalEvents.push_back({{"time",seconds()},{"event",restore?"restore":"failure"},{"a",a},{"b",b},{"cause",cause}});
+    for(auto &e:recovery)if(!std::isfinite(e.until)){e.until=seconds();for(auto &[key,t]:e.flows)if(!std::isfinite(t))t=-seconds();}
+    Recovery event{seconds(),a,b,restore,{}};for(auto &[key,f]:flows){event.flows[key]=INFINITY;auto &path=lastPaths[key];for(size_t i=1;i<path.size();i++)if((path[i-1]==a&&path[i]==b)||(path[i-1]==b&&path[i]==a))event.affected.insert(key);for(auto &prior:recovery)if(prior.affected.count(key)&&(prior.flows.at(key)<0||!std::isfinite(prior.flows.at(key))))event.affected.insert(key);}event.applied.assign(n,INFINITY);recovery.push_back(event);
+    failureLog<<seconds()<<','<<(restore?"restore":"failure")<<','<<a<<','<<b<<'\n';
+    if(router && !control) {
       if(restore)router->onNetworkEvent({{"event","restore"}});
       else {double failedAt=seconds(),detect=c.value("csibDetectDelay",-1.);if(detect<0)detect=c.value("slsInterval",.2)*c.value("slsMissCount",3);
         schedule(seconds()+detect,[this,a,b,failedAt]{context.epoch++;router->onNetworkEvent({{"event","failure-detected"},{"a",a},{"b",b},{"failedAt",failedAt}});});}
     }
   }
   void failureSchedule() {
+    if(c.value("physicalPrepared",false)) {for(const auto &e:c.at("physicalEvents")){double t=e["time"];int a=e["a"],b=e["b"];bool up=e["event"]=="restore";std::string cause=e.value("cause",std::string("failure"));schedule(t,[this,a,b,up,cause]{fail(a,b,up,cause);});}return;}
+    for(const auto &e:c.value("scheduledEvents",J::array())){double t=e["time"];int a=e["a"],b=e["b"];bool up=e["event"]=="restore";schedule(t,[this,a,b,up]{fail(a,b,up,"scheduled");});}
     for(const auto &e:c.value("failureReplayEvents",J::array())) {double t=e["time"];int a=e["a"],b=e["b"];bool up=e.value("event",std::string())=="restore";schedule(t,[this,a,b,up]{fail(a,b,up);});}
     if(!c.value("failureReplayEvents",J::array()).empty())return;
     std::string text=c.value("failureSchedule",std::string());for(char &ch:text)if(ch==','||ch==';')ch=' ';
@@ -502,7 +579,13 @@ class Simulation {
     while(input>>item) {
       std::smatch m;if(!std::regex_match(item,m,std::regex(R"((route|([0-9]+)-([0-9]+))@([0-9.eE+-]+?)(?:\+([0-9.eE-]+))?)")))throw std::runtime_error("Invalid failure schedule: "+item);
       bool route=m[1]=="route";int a=route?-1:std::stoi(m[2]),b=route?-1:std::stoi(m[3]);double t=std::stod(m[4]),duration=m[5].matched?std::stod(m[5]):0;
-      schedule(t,[this,a,b,route,duration]()mutable{if(route){if(lastRoute.size()<2){record({{"event","failure-skipped"},{"reason","no-active-route"}});return;}int k=(lastRoute.size()-1)/2;a=lastRoute[k];b=lastRoute[k+1];}fail(a,b);if(duration>0)schedule(seconds()+duration,[this,a,b]{fail(a,b,true);});});
+      schedule(t,[this,a,b,route,duration]()mutable{if(route){update(false);int src=c.value("failureRouteSrc",-1),dst=c.value("failureRouteDst",-1);
+      if(src<0)for(auto &s:c["stations"])if(s.value("enabled",false)&&s.value("dstStation",-1)>=0){src=s["id"];dst=s["dstStation"];break;}
+      if(src>=0&&src<g&&dst<0)dst=c["stations"][src].value("dstStation",-1);
+      if(src<0||src>=g||dst<0||dst>=g||src==dst)throw std::runtime_error("route@ requires a fixed reference source and destination");
+      Context reference=context;reference.c["algorithm"]="dijkstra-delay";reference.graph=[this](int){mcsr::Graph g(n);for(int u=0;u<n;u++)for(auto &[v,l]:links[u])if(v<n&&l.nominal&&l.active)g.addDirected(u,v,{l.prop*1000,1.,0.});return g;};reference.failures=[this](int){return knownFailures(-1);};
+      DijkstraRouting oracle(reference);int first=oracle.selectUplink(src,dst);Packet p;p.dest=dst;auto path=first<0?std::vector<int>{}:oracle.forward(p,first).path;
+      if(path.size()<2)throw std::runtime_error("Reference route has no ISL to cut");int k=(path.size()-1)/2;a=path[k];b=path[k+1];}fail(a,b);if(duration>0)schedule(seconds()+duration,[this,a,b]{fail(a,b,true);});});
     }
     int count=c.value("randomFailures",0);double lo=c.value("randomStart",0.),hi=c.value("randomEnd",0.),duration=c.value("randomDuration",0.);
     if(count && hi<=lo)throw std::runtime_error("Invalid random failure window");
@@ -518,10 +601,11 @@ class Simulation {
     long long sent=0,received=0,dropped=0;
     for(auto &[key,f]:flows) {
       long long rx=f.received-f.lastReceived;double delay=rx?(f.delaySum-f.lastDelaySum)/rx*1000:0;
-      series<<seconds()<<','<<key.first<<','<<key.second<<','<<f.sent-f.lastSent<<','<<rx<<','<<f.dropped-f.lastDropped<<','<<(f.bytes-f.lastBytes)*8/window/1e6<<','<<delay<<','<<f.queued<<'\n';
-      f.lastSent=f.sent;f.lastReceived=f.received;f.lastDropped=f.dropped;f.lastBytes=f.bytes;f.lastDelaySum=f.delaySum;
+      series<<seconds()<<','<<key.first<<','<<key.second<<','<<f.sent-f.lastSent<<','<<rx<<','<<f.dropped+f.sourceDropped-f.lastDropped-f.lastSourceDropped<<','<<(f.bytes-f.lastBytes)*8/window/1e6<<','<<delay<<','<<f.queued<<'\n';
+      f.lastSent=f.sent;f.lastReceived=f.received;f.lastDropped=f.dropped;f.lastSourceDropped=f.sourceDropped;f.lastBytes=f.bytes;f.lastDelaySum=f.delaySum;
       sent+=f.sent;received+=f.received;dropped+=f.dropped;
     }
+    if(control){auto &c=*control;controlSeries<<seconds()<<','<<c.generated<<','<<c.hopAccepted<<','<<c.arrived<<','<<c.dropped<<','<<c.wireBytes<<','<<c.busySeconds<<','<<c.hopAccepted-c.arrived-c.dropped<<'\n';}
     J status={{"time",seconds()},{"limit",limit/TICKS},{"sent",sent},{"received",received},{"dropped",dropped},{"progress",seconds()/(limit/TICKS)}};
     std::ofstream(out+"/progress.tmp")<<status.dump();
     std::error_code ec;std::filesystem::rename(out+"/progress.tmp",out+"/progress.json",ec);
@@ -531,38 +615,61 @@ class Simulation {
 public:
   Simulation(J cfg,const std::string &directory):c(std::move(cfg)),out(directory),n(c["numSatellites"]),g(c["stations"].size()),limit(ticks(c["simTimeLimit"])),trafficRng(c.value("seed",23542)),failureRng(c.value("failureSeed",4242)),sat(n),ground(g),links(n+g) {
     if(n<6||n>20000||g<1||g>5000||limit<=0||c["planes"].get<int>()<2||n%c["planes"].get<int>())throw std::runtime_error("Invalid engine dimensions");
+    mcsr::OpScope initialCount(&context.operations);
     auto year=[](int y){return y<57?y+2000:y+1900;};cJulian base(year(c.value("baseYear",20)),c.value("baseDay",1.5)),epoch(year(c.value("epochYear",20)),c.value("epochDay",1.5));gap=base.spanSec(epoch);
     int per=n/c["planes"].get<int>();for(int i=0;i<n;i++)orbits.emplace_back(new cOrbitA("sat",c.value("epochYear",20),c.value("epochDay",1.5),c["altitude"],c.value("eccentricity",.000001),c["inclination"],std::fmod((i/per)*360.*c["phasing"].get<int>()/n+(i%per)*360./per,360.),c.value("bstar",.00042243),.00001846,i,c["planes"],per,(i/per)*360./c["planes"].get<int>(),0));
-    csv.open(out+"/routes.csv");trace.open(out+"/events.csv");network.open(out+"/network-events.jsonl");series.open(out+"/timeseries.csv");failureLog.open(out+"/failures.csv");
-    if(!csv||!trace||!network||!series||!failureLog)throw std::runtime_error("Cannot create output files");
+    csv.open(out+"/routes.csv");trace.open(out+"/events.csv");network.open(out+"/network-events.jsonl");series.open(out+"/timeseries.csv");failureLog.open(out+"/failures.csv");controlSeries.open(out+"/control-series.csv");controlSeries<<"time,generated,hopAccepted,arrived,dropped,wireBytes,busySeconds,inFlight\n";
+    if(!csv||!trace||!network||!series||!failureLog||!controlSeries)throw std::runtime_error("Cannot create output files");
     csv<<std::setprecision(14)<<"time,route,source,station,firstSat,exitSat,satHops,uplinkMs,satToStationMs,totalMs,path\n";
     trace<<std::setprecision(14)<<"time,event,source,destination,detail,packet_id,hops\n";
     series<<std::setprecision(14)<<"time,source,destination,sent,received,dropped,throughputMbps,delayMs,queued\n";failureLog<<std::setprecision(14)<<"time,event,satA,satB\n";
-    context.c=c;context.n=n;context.g=g;context.graph=[this](int v){return graph(v);};context.exits=[this](int d){return exits(d);};context.uplinks=[this](int s){return uplinks(s);};context.failures=[this](int v){return knownFailures(v);};context.schedule=[this](double t,auto f){schedule(t,f);};context.record=[this](J e){record(e);};
+    context.c=c;context.revision=[this](int node){return control?control->revision(node):0;};context.topologyRevision=[this](int node){return control&&node>=0?control->views.at(node).topologyRevision:0;};context.n=n;context.g=g;context.graph=[this](int v){return graph(v);};context.exits=[this](int d){return exits(d);};context.uplinks=[this](int s){return uplinks(s);};context.failures=[this](int v){return knownFailures(v);};context.schedule=[this](double t,auto f){schedule(t,f);};context.record=[this](J e){record(e);};
     zones=leocongestion::parseZones(c.value("congestionZones",std::string()));update();
     auto factories=routingFactories();auto name=c.value("algorithm",std::string("dijkstra-delay"));if(!factories.count(name))throw std::runtime_error("Unknown routing algorithm");router=factories.at(name)(context);
     if(srdOf.empty() && c.value("scenario",J::object()).dump().find("\"srd\"")!=std::string::npos){mcsr::PlannerConfig pc;pc.planes=c["planes"];pc.satsPerPlane=per;auto p=mcsr::Planner::create(pc,graph(-1));srdOf=p->srdPlan().srdOf;}
+    if(!c.value("prepareOnly",false)&&c.value("controlMode",std::string("packet"))=="packet") {
+      std::vector<int> owners;if(!srdOf.empty()){int count=*std::max_element(srdOf.begin(),srdOf.end())+1;owners.assign(count,-1);
+        mcsr::PlannerConfig pc;pc.planes=c["planes"];pc.satsPerPlane=per;pc.interPlaneSpacing=c["phasing"];pc.fixedK=initialK;pc.fixedL=initialL;auto planner=mcsr::Planner::create(pc,graph(-1));
+        for(int k=0;k<count;k++)owners[k]=planner->router().electDs(k,mcsr::FailureSet{});
+      }
+      control=std::make_unique<ControlPlane>(c,n,nominalIsls,srdOf,owners,[this]{return seconds();},[this](double t,auto f){schedule(t,f);},
+        [this](int a,int b,ControlPlane::Msg message,int ttl){auto p=std::make_shared<Packet>();p->control=message;p->ttl=ttl;p->id=-(long long)message->nonce;p->bytes=message->payloadBytes;transmit(p,a,b);},
+        [this](int u){std::vector<LinkReport> rows;for(auto &[v,l]:links[u])if(v<n&&l.nominal){int cap=c.value("queueCapacity",500);double A=cap?std::max(0.,1-double(l.queue.size())/cap):1.;rows.push_back({u,v,true,l.extra+(c.value("jitterModel",std::string("packet"))=="packet"?std::sqrt(3.)*l.extraJ:0.),std::min(A,l.availability),(c.value("jitterModel",std::string("packet"))=="cost"?std::hypot(c.value("jitterSource",std::string("arrival"))=="delayChange"?std::abs(l.prop-l.previousProp):l.jitter,l.extraJ):(c.value("jitterSource",std::string("arrival"))=="delayChange"?std::abs(l.prop-l.previousProp):l.jitter))*1000});}std::sort(rows.begin(),rows.end(),[](auto a,auto b){return a.b<b.b;});return rows;},
+        [this](J event){record(event);},[this,per](int k,int viewer){ComputeTimer measure(context,"ds-vote");mcsr::PlannerConfig pc;pc.planes=c["planes"];pc.satsPerPlane=per;pc.interPlaneSpacing=c["phasing"];pc.fixedK=initialK;pc.fixedL=initialL;auto planner=mcsr::Planner::create(pc,graph(viewer));return planner->router().voteDs(k);});
+    }
     failureSchedule();
     for(const auto &e:c.value("scenario",J::object()).value("entries",J::array()))for(auto key:{"start_s","end_s"})if(e.contains(key)&&!e[key].is_null()){double t=e[key];if(t>=0)schedule(t,[this]{applyCongestion();});}
     for(auto &z:zones){schedule(z.start,[this]{applyCongestion();});if(z.duration>0)schedule(z.start+z.duration,[this]{applyCongestion();});}
-    for(int i=0;i<g;i++)if(c["stations"][i].value("enabled",false)) {
+    for(int i=0;i<g;i++)if(!c.value("prepareOnly",false)&&c["stations"][i].value("enabled",false)) {
       auto &s=c["stations"][i];double start=s.contains("startTime")?s["startTime"].get<double>():s.contains("startRange")?s["startRange"][0].get<double>()+random()*(s["startRange"][1].get<double>()-s["startRange"][0].get<double>()):1+4*random();
       if(ticks(s["sendInterval"].get<double>())<1)throw std::runtime_error("Traffic interval below resolution");if(start<s.value("endTime",limit/TICKS))schedule(start,[this,i]{send(i);});
     }
     schedule(1,[this]{sample();});
   }
   void run() {
+    mcsr::OpScope count(&context.operations);
     while(!events.empty()){auto e=events.top();events.pop();now=e.time;context.now=seconds();e.action();}
     now=limit;context.now=seconds();sample();J rows=J::array();long long sent=0,received=0,dropped=0,attempted=0,bytes=0;double delaySum=0;
     for(auto &[key,f]:flows){sent+=f.sent;received+=f.received;dropped+=f.dropped;attempted+=f.attempted;bytes+=f.bytes;delaySum+=f.delaySum;
-      rows.push_back({{"source",key.first},{"destination",key.second},{"attempted",f.attempted},{"sent",f.sent},{"received",f.received},{"dropped",f.dropped},{"inFlight",f.sent-f.received-f.dropped},{"deliveryRate",f.sent?100.*f.received/f.sent:0},{"offeredDeliveryRate",f.attempted?100.*f.received/f.attempted:0},{"meanDelayMs",1000*f.mean},{"delayStdMs",f.received>1?1000*std::sqrt(f.m2/(f.received-1)):0},{"maxDelayMs",f.maxDelay*1000},{"jitterMs",f.jitter*1000},{"meanHops",f.received?double(f.hops)/f.received:0},{"maxGapSeconds",f.maxGap},{"outages",f.outages},{"throughputMbps",f.bytes*8/(limit/TICKS)/1e6}});}
+      rows.push_back({{"source",key.first},{"destination",key.second},{"attempted",f.attempted},{"sent",f.sent},{"received",f.received},{"dropped",f.dropped+f.sourceDropped},{"sourceDropped",f.sourceDropped},{"inFlight",f.sent-f.received-f.dropped},{"deliveryRate",f.attempted?100.*f.received/f.attempted:0},{"admittedDeliveryRate",f.sent?100.*f.received/f.sent:0},{"offeredDeliveryRate",f.attempted?100.*f.received/f.attempted:0},{"meanDelayMs",1000*f.mean},{"delayStdMs",f.received>1?1000*std::sqrt(f.m2/(f.received-1)):0},{"maxDelayMs",f.maxDelay*1000},{"jitterMs",f.jitter*1000},{"meanHops",f.received?double(f.hops)/f.received:0},{"maxGapSeconds",f.maxGap},{"outages",f.outages},{"throughputMbps",f.bytes*8/(limit/TICKS)/1e6}});}
     if(received+dropped>sent)throw std::runtime_error("Packet conservation violated");
     std::ostringstream hash;hash<<std::hex<<trafficHash;
-    J result={{"engine","leo-native"},{"version","2.0.0"},{"algorithm",c["algorithm"]},{"attempted",attempted},{"sent",sent},{"received",received},{"dropped",dropped},{"inFlight",sent-received-dropped},{"noUplink",noUplink},{"delaySumSeconds",delaySum},{"meanDelayMs",received?1000*delaySum/received:0},{"deliveryRate",sent?100.*received/sent:0},{"throughputMbps",bytes*8/(limit/TICKS)/1e6},{"maxQueuePackets",maxQueue},{"replanned",replanned},{"reservedSwitches",reserved},{"trafficHash",hash.str()},{"trafficHashAlgorithm","fnv1a64"},{"dropReasons",dropReasons},{"flows",rows},{"routeRecording",c.value("routeRecording",std::string("full"))},{"packetTrace",c.value("packetTrace",false)},{"experimental",c.value("experimental",false)||!c.value("scenario",J::object()).value("entries",J::array()).empty()||!zones.empty()},{"congestionMode",c.value("congestionMode",std::string("actual"))}};
+    J result={{"engine","leo-native"},{"version","3.0.0"},{"algorithm",c["algorithm"]},{"attempted",attempted},{"sent",sent},{"received",received},{"dropped",dropped+noUplink},{"admittedDropped",dropped},{"inFlight",sent-received-dropped},{"noUplink",noUplink},{"delaySumSeconds",delaySum},{"meanDelayMs",received?1000*delaySum/received:0},{"deliveryRate",attempted?100.*received/attempted:0},{"admittedDeliveryRate",sent?100.*received/sent:0},{"throughputMbps",bytes*8/(limit/TICKS)/1e6},{"maxQueuePackets",maxQueue},{"replanned",replanned},{"reservedSwitches",reserved},{"trafficHash",hash.str()},{"trafficHashAlgorithm","fnv1a64"},{"dropReasons",dropReasons},{"flows",rows},{"routeRecording",c.value("routeRecording",std::string("full"))},{"packetTrace",c.value("packetTrace",false)},{"experimental",c.value("experimental",false)||!c.value("scenario",J::object()).value("entries",J::array()).empty()||!zones.empty()},{"congestionMode",c.value("congestionMode",std::string("actual"))}};
+    result["appliedProcessingDelays"]=J::object();result["requestedProcessingDelays"]=J::object();for(auto key:{"reserveDelay","repairDelay","spfDelay","csibComputeDelay","csibReportProcDelay","csibHopProcDelay","floodHopDelay"}){result["requestedProcessingDelays"][key]=c.value(key,0.);result["appliedProcessingDelays"][key]=c.value("processingMode",std::string("neutral"))=="neutral"?0:c.value(key,0.);}
+    if(!attempted)result["deliveryRate"]=nullptr;
+    result["metricVersion"]=3;result["modelVersion"]="leo-research-3";result["processingMode"]=c.value("processingMode",std::string("neutral"));result["controlMode"]=c.value("controlMode",std::string("packet"));result["jitterModel"]=c.value("jitterModel",std::string("packet"));
+    result["computeMs"]=context.computeMs;result["computations"]=context.computations;
+    auto &o=context.operations;result["operations"]={{"edgeChecks",o.edgeChecks},{"pqPush",o.pqPush},{"pqPop",o.pqPop},{"relaxations",o.relaxations},{"searches",o.searches},{"labelExpand",o.labelExpand},{"dominanceCmp",o.dominanceCmp},{"labelInsert",o.labelInsert},{"labelDelete",o.labelDelete},{"tableHit",o.tableHit},{"tableMiss",o.tableMiss},{"planHit",o.planHit},{"planMiss",o.planMiss},{"computations",o.computations},{"segmentEdgeScan",o.segmentEdgeScan},{"reserveSwitches",o.reserveSwitches},{"recomputes",o.recomputes}};
+    if(control){auto &c=*control;result["control"]={{"generated",c.generated},{"generatedByKind",c.generatedByKind},{"hopAccepted",c.hopAccepted},{"arrived",c.arrived},{"dropped",c.dropped},{"inFlight",c.hopAccepted-c.arrived-c.dropped},{"wireBytes",c.wireBytes},{"busySeconds",c.busySeconds},{"dropReasons",c.droppedByReason}};}
+    J events=J::array();for(auto &e:physicalEvents)events.push_back(e);std::ofstream(out+"/physical-events.json")<<events.dump();
+    J recoveries=J::array();for(auto &e:recovery){J rows=J::array();for(auto &[key,t]:e.flows)rows.push_back({{"source",key.first},{"destination",key.second},{"receivedAt",std::isfinite(t)&&t>=0?J(t):J(nullptr)},{"affected",e.affected.count(key)>0},{"recoverySeconds",e.affected.count(key)&&std::isfinite(t)&&t>=0?J(t-e.time):J(nullptr)},{"censoredAt",std::isfinite(e.until)?e.until:limit/TICKS}});double applied=0;int count=0;for(auto t:e.applied)if(std::isfinite(t)){count++;applied=std::max(applied,t);}
+      recoveries.push_back({{"detectedSeconds",std::isfinite(e.detected)?J(e.detected-e.time):J(nullptr)},{"appliedNodes",count},{"expectedNodes",n},{"convergenceSeconds",count==n?J(applied-e.time):J(nullptr)},{"time",e.time},{"a",e.a},{"b",e.b},{"restore",e.up},{"flows",rows}});}result["recovery"]=recoveries;
+    if(control&&control->hopAccepted<control->arrived+control->dropped)throw std::runtime_error("Control conservation failed");
+    if(attempted!=received+dropped+noUplink+(sent-received-dropped))throw std::runtime_error("Offered packet conservation failed");
     std::ofstream(out+"/summary.json")<<result.dump(2);
   }
 };
 int main(int argc,char **argv) {
-  try{if(argc!=3)throw std::runtime_error("Usage: engine.exe input.json output-directory");J c;std::ifstream(argv[1])>>c;Simulation simulation(c,argv[2]);simulation.run();return 0;}
+  try{if(argc!=3&&argc!=4)throw std::runtime_error("Usage: engine.exe input.json output-directory");J c;std::ifstream(argv[1])>>c;if(argc==4&&std::string(argv[3])=="--prepare"){c["prepareOnly"]=true;c["algorithm"]="dijkstra-delay";c["controlMode"]="time";}Simulation simulation(c,argv[2]);simulation.run();return 0;}
   catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}
 }

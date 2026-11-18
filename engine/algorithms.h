@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Modified/adapted 2026-11-16; see ../THIRD_PARTY_NOTICES.txt.
 #pragma once
+#include "vendor/routing/mcsr/types.h"
 #include <cmath>
 #include <functional>
 #include <queue>
@@ -27,14 +28,17 @@ Tree dijkstra(const std::vector<std::vector<Edge>> &adj, int root, bool hop) {
   t.delay[root] = 0;
   q.push({0, root});
   while (!q.empty()) {
+    MCSR_OP(pqPop,1);
     auto [d, u] = q.top();
     q.pop();
     if (d > t.cost[u])
       continue;
     for (auto e : adj[u]) {
+      MCSR_OP(edgeChecks,1);
       double nd = d + (hop ? 1 + 1e-6 * e.delay : e.delay);
       if (nd < t.cost[e.to] - 1e-15 ||
           (std::abs(nd - t.cost[e.to]) <= 1e-15 && u < t.next[e.to])) {
+        MCSR_OP(relaxations,1);MCSR_OP(pqPush,1);
         t.cost[e.to] = nd;
         t.delay[e.to] = t.delay[u] + e.delay;
         t.next[e.to] = u;

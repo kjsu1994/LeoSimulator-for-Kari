@@ -22,6 +22,12 @@ function openSettings(cfg){
   const basicKeys=["numSatellites","planes","altitude","inclination","simTimeLimit","seed"];
   const addField=(grid,f)=>grid.append(control(f.label,"edit-"+f.key,cfg[f.key],"number",{min:f.min,max:f.max,step:f.type==="int"?"1":"any"}));
   for(const f of cfg.capabilities.fields.filter(f=>basicKeys.includes(f.key)))addField(grid,f);
+  const [models,mg]=group("실험 모델",true);container.append(models);
+  for(const [key,label,choices]of [["processingMode","처리 지연",{neutral:"추가 지연 없음",assumed:"가정값 적용"}],["controlMode","제어 통신",{packet:"실제 패킷",time:"시간 가정"}],["jitterModel","지터",{packet:"실제 지연 변동",cost:"라우팅 비용 주입"}],["islMode","ISL 연결",{fixed:"고정 격자",scheduled:"계획된 개폐"}]])mg.append(control(label,"edit-"+key,cfg[key]||Object.keys(choices)[0],"select",choices));
+  for(const [key,label]of [["controlRefresh","제어 갱신 (s)"],["controlTimeout","수집 제한 시간 (s)"],["controlHeaderBytes","제어 헤더 (B)"],["controlRecordBytes","상태 레코드 (B)"]])mg.append(control(label,"edit-"+key,cfg[key],"number",{min:key.endsWith("Bytes")?1:1e-11,step:key.endsWith("Bytes")?1:"any"}));
+  const scheduleLabel=node("label",{class:"file-btn"},"ISL 개폐 일정 가져오기"),scheduleFile=node("input",{type:"file",accept:".csv",hidden:true});scheduleLabel.append(scheduleFile);mg.append(scheduleLabel);
+  scheduleFile.onchange=async()=>{try{nativeUI.scenario.scheduled_events=readEventCsv(await scheduleFile.files[0].text());byId("edit-islMode").value="scheduled";scheduleLabel.firstChild.textContent=`ISL 일정 ${nativeUI.scenario.scheduled_events.length}개`;byId("settingsError").textContent="";}catch(e){byId("settingsError").textContent=e.message;}};
+  if(cfg.islScheduleFile)mg.append(control("기존 일정 경로","edit-islScheduleFile",cfg.islScheduleFile,"text"));
   const [traffic,tf]=group("트래픽",true);container.append(traffic);
   const enabled=cfg.stations.filter(s=>s.enabled);const first=enabled[0]||cfg.stations[0];
   const senderWrap=node("details",{class:"sender-list"});senderWrap.append(node("summary",{},`송신 노드 (${enabled.length}개 선택)`));
@@ -47,10 +53,10 @@ function openSettings(cfg){
   const csibKeys=cfg.capabilities.fields.filter(f=>f.key.startsWith("csib")).map(f=>f.key);
   const experimental=["srdK","srdL"];
   for(const f of cfg.capabilities.fields.filter(f=>!basicKeys.includes(f.key)&&!common.includes(f.key)&&!csibKeys.includes(f.key)&&!experimental.includes(f.key)&&!["slsInterval","slsMissCount","floodHopDelay","spfDelay"].includes(f.key)))addField(mf,f);
-  mf.append(control("지터 측정 방식","edit-jitterSource",cfg.jitterSource,"select",{arrival:"도착 간격",delayChange:"전파 지연 변화"}));
+  mf.append(control("지터 측정 방식","edit-jitterSource",cfg.jitterSource,"select",{arrival:"도착 지연 변동",delayChange:"전파 지연 변화"}));
   for(const key of ["reservedPaths","snapshotOnDelayUpdate"]){const label=node("label",{class:"check-field"});label.append(node("input",{id:"edit-"+key,type:"checkbox",checked:cfg[key]}),document.createTextNode(key==="reservedPaths"?"예비 경로 사용":"전파 지연 갱신 시 상태 재계산"));mf.append(label);}
   const [csib,cf]=group("DS·CSIB");csib.dataset.mcsr="1";container.append(csib);
-  for(const key of ["csibEnabled","csibVote"]){const label=node("label",{class:"check-field"});label.append(node("input",{id:"edit-"+key,type:"checkbox",checked:cfg[key]}),document.createTextNode(key==="csibEnabled"?"CSIB 시간 모델 사용":"DS 투표 사용"));cf.append(label);}
+  for(const key of ["csibEnabled","csibVote"]){const label=node("label",{class:"check-field"});label.append(node("input",{id:"edit-"+key,type:"checkbox",checked:cfg[key]}),document.createTextNode(key==="csibEnabled"?"DS·CSIB 사용":"DS 투표 사용"));cf.append(label);}
   for(const f of cfg.capabilities.fields.filter(f=>csibKeys.includes(f.key)))addField(cf,f);
   const [experiment,ef]=group("MCSR 추가 실험");experiment.dataset.mcsr="1";container.append(experiment);
   for(const f of cfg.capabilities.fields.filter(f=>experimental.includes(f.key)))addField(ef,f);
@@ -74,7 +80,7 @@ function openSettings(cfg){
   buildEntryForm();refreshEntries();byId("edit-congestionMode").onchange=modeChanged;modeChanged();
   const [recording,rf]=group("기록");container.append(recording);rf.append(control("경로 기록","edit-routeRecording",cfg.routeRecording,"select",{changes:"변경된 경로",full:"모든 계획 경로"}));
   const pt=node("label",{class:"check-field"});pt.append(node("input",{id:"edit-packetTrace",type:"checkbox",checked:cfg.packetTrace}),document.createTextNode("전체 패킷 기록 (대용량)"));rf.append(pt);
-  byId("edit-algorithm").onchange=updateMcsrControls;updateMcsrControls();byId("settingsDialog").showModal();
+  const applied=()=>{updateMcsrControls();for(const key of ["reserveDelay","repairDelay","spfDelay","csibComputeDelay","csibReportProcDelay","csibHopProcDelay","floodHopDelay"]){const e=byId("edit-"+key);if(e)e.disabled=e.disabled||value("edit-processingMode")==="neutral";}for(const key of ["failureKnowledge","failureScopeHops","csibDetectDelay"]){const e=byId("edit-"+key);if(e)e.disabled=value("edit-controlMode")==="packet";}};byId("edit-algorithm").onchange=applied;byId("edit-processingMode").onchange=()=>{for(const e of container.querySelectorAll("input,select"))e.disabled=false;applied();};byId("edit-controlMode").onchange=applied;applied();byId("settingsDialog").showModal();
 }
 const cities={"서울":[37.5665,126.978],"도쿄":[35.6762,139.6503],"베이징":[39.9042,116.4074],"싱가포르":[1.3521,103.8198],"시드니":[-33.8688,151.2093],"뭄바이":[19.076,72.8777],"두바이":[25.2048,55.2708],"모스크바":[55.7558,37.6173],"런던":[51.5074,-.1278],"파리":[48.8566,2.3522],"프랑크푸르트":[50.1109,8.6821],"카이로":[30.0444,31.2357],"라고스":[6.5244,3.3792],"요하네스버그":[-26.2041,28.0473],"뉴욕":[40.7128,-74.006],"로스앤젤레스":[34.0522,-118.2437],"멕시코시티":[19.4326,-99.1332],"상파울루":[-23.5505,-46.6333],"부에노스아이레스":[-34.6037,-58.3816],"산티아고":[-33.4489,-70.6693]};
 function buildEntryForm(entry=null){
@@ -104,7 +110,7 @@ function buildEntryForm(entry=null){
   const time=node("div",{class:"editor-grid"});form.append(time);
   time.append(control("시작 (s)","entry-start",entry?.start_s??0,"number",{min:0}),control("종료 (s, 빈칸=끝까지)","entry-end",entry?.end_s??"","number",{min:0}),control("점진 증가 (s)","entry-ramp",entry?.ramp_s??0,"number",{min:0}),control("혼잡도 (%)","entry-rho",(entry?.rho??.6)*100,"number",{min:1,max:99}));
   for(const [key,label,defaultValue]of [["fail","링크 장애",false],["use_capacity","용량 감소",true],["use_buffer","가용 버퍼 감소",false],["use_queue","M/M/1 지연·지터",false]]){const wrap=node("label",{class:"check-field"});wrap.append(node("input",{id:"entry-"+key,type:"checkbox",checked:entry?!!entry[key]:defaultValue}),document.createTextNode(label));form.append(wrap);}
-  const penalty=node("div",{class:"editor-grid"});for(const [key,label,max]of [["delay_ms","추가 지연 (ms)",100000],["jitter_ms","라우팅 지터 (ms)",100000],["loss_pct","패킷 손실률 (%)",100]])penalty.append(control(label,"penalty-"+key,entry?.penalty?.[key]??0,"number",{min:0,max}));form.append(penalty);
+  const penalty=node("div",{class:"editor-grid"});for(const [key,label,max]of [["delay_ms","추가 지연 (ms)",100000],["jitter_ms","추가 지연 표준편차 (ms)",100000],["loss_pct","패킷 손실률 (%)",100]])penalty.append(control(label,"penalty-"+key,entry?.penalty?.[key]??0,"number",{min:0,max}));form.append(penalty);
   byId("entry-fail").onchange=()=>{const fail=byId("entry-fail").checked;byId("target-direction").disabled=fail;if(fail)byId("target-direction").value="both";for(const key of ["use_capacity","use_buffer","use_queue"]){byId("entry-"+key).disabled=fail;if(fail)byId("entry-"+key).checked=false;}for(const e of penalty.querySelectorAll("input")){e.disabled=fail;if(fail)e.value=0;}if(fail)byId("entry-ramp").value=0;};byId("entry-fail").onchange();
   const actions=node("div",{class:"entry-actions"});const add=node("button",{type:"button",class:"btn-primary"},nativeUI.entryIndex<0?"조건 추가":"조건 수정");
   add.onclick=()=>{try{const e=entryFromForm();if(nativeUI.entryIndex<0)nativeUI.scenario.entries.push(e);else nativeUI.scenario.entries[nativeUI.entryIndex]=e;nativeUI.entryIndex=-1;refreshEntries();buildEntryForm();byId("settingsError").textContent="";}catch(error){byId("settingsError").textContent=error.message;}};actions.append(add);
@@ -126,7 +132,7 @@ function refreshEntries(){const list=byId("scenarioEntries");list.replaceChildre
 byId("btnSettings").onclick=async()=>{try{const r=await fetch(`/api/config?config=${encodeURIComponent(cfgNameSel.value)}`,{cache:"no-store"});const cfg=await r.json();if(!r.ok)throw Error(cfg.error);openSettings(cfg);}catch(e){setStatus(e.message);}};
 for(const button of document.querySelectorAll("[data-close]"))button.onclick=()=>byId(button.dataset.close).close();
 byId("settingsForm").onsubmit=async event=>{
-  event.preventDefault();const save=event.submitter;save.disabled=true;
+  event.preventDefault();const save=event.submitter||byId("settingsForm").querySelector("[type=submit]");save.disabled=true;
   try {
     const cfg=nativeUI.config,first=cfg.stations.find(s=>s.enabled)||cfg.stations[0],changes={senders:[...document.querySelectorAll(".sender-check:checked")].map(e=>Number(e.value))};
     if(value("edit-algorithm")!==cfg.algorithm)changes.algorithm=value("edit-algorithm");
@@ -136,6 +142,8 @@ byId("settingsForm").onsubmit=async event=>{
     for(const key of Object.keys(cfg.capabilities.choices)){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.value;}
     for(const key of ["congestionMode","failureSchedule","failureKnowledge","congestionZones","routeRecording","failureReplay"]){const input=byId("edit-"+key);if(input)changes[key]=input.value;}
     for(const key of ["randomFailures","randomStart","randomEnd","randomDuration","failureSeed","congestionRefresh","congestionBuffer","congestionPacketBytes"])changes[key]=numeric("edit-"+key);
+    for(const key of ["processingMode","controlMode","jitterModel","islMode","islScheduleFile"]){const e=byId("edit-"+key);if(e)changes[key]=e.value;}
+    for(const key of ["controlRefresh","controlTimeout","controlHeaderBytes","controlRecordBytes"])changes[key]=numeric("edit-"+key);
     changes.packetTrace=byId("edit-packetTrace").checked;
     const response=await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfg.activeConfig,changes,scenario:nativeUI.scenario})});const result=await response.json();if(!response.ok)throw Error(result.error||"저장하지 못했습니다.");
     applyLoadedConfig(result,{announce:true});byId("settingsDialog").close();setStatus("INI에 저장했습니다. 실행하면 새 설정이 적용됩니다.");
@@ -149,22 +157,23 @@ canvas.addEventListener("pointerup",e=>{const d=nativeUI.drawing;if(!d?.start)re
   byId("settingsDialog").showModal();});
 window.addEventListener("keydown",e=>{if(e.key==="Escape"&&nativeUI.drawing){nativeUI.drawing=null;byId("settingsDialog").showModal();}});
 
-const metricLabels={attempted:"송신 시도",sent:"송신",received:"수신",dropped:"폐기",inFlight:"전송 중",deliveryRate:"전달률 (%)",meanDelayMs:"평균 지연 (ms)",throughputMbps:"처리량 (Mbps)",replanned:"재계산",reservedSwitches:"예비 경로 전환",peakMemoryBytes:"최대 메모리 (B)",elapsedSeconds:"계산 시간 (s)"};
-function metricText(v,d=2){return v===null||v===undefined?"—":Number(v).toLocaleString("ko-KR",{maximumFractionDigits:d});}
+const metricLabels={attempted:"발생",sent:"송신",received:"수신",dropped:"폐기",inFlight:"전송 중",deliveryRate:"전달률 (%)",meanDelayMs:"평균 지연 (ms)",throughputMbps:"처리량 (Mbps)",replanned:"재계산",reservedSwitches:"예비 경로 전환",peakMemoryBytes:"최대 메모리 (B)",elapsedSeconds:"계산 시간 (s)"};
+function metricText(v,d=2){return v===null||v===undefined||!Number.isFinite(Number(v))?"—":Number(v).toLocaleString("ko-KR",{maximumFractionDigits:d});}
 function measured(s,key){return ["meanDelayMs","delayStdMs","maxDelayMs","jitterMs","meanHops"].includes(key)&&!s.received?null:s[key];}
 function showMetrics(result){
-  nativeUI.result=result;const s=result?.summary;byId("nativeMetrics").hidden=!s;if(!s)return;
+  nativeUI.result=result;const raw=result?.summary,s=raw?offered(raw):null;byId("nativeMetrics").hidden=!s;if(!s)return;
   const grid=byId("metricValues");grid.replaceChildren();
-  for(const key of ["sent","received","dropped","inFlight","deliveryRate","meanDelayMs","throughputMbps","maxQueuePackets"]){const e=node("div");e.append(node("small",{},metricLabels[key]||"최대 대기 (패킷)"),node("strong",{},metricText(measured(s,key))));grid.append(e);}
+  for(const key of ["attempted","received","dropped","inFlight","deliveryRate","meanDelayMs","throughputMbps","maxQueuePackets"]){const e=node("div");e.append(node("small",{},metricLabels[key]||"최대 대기 (패킷)"),node("strong",{},metricText(measured(s,key))));grid.append(e);}
   const body=byId("flowMetrics").tBodies[0];body.replaceChildren();byId("metricFlow").replaceChildren(new Option("전체 흐름","all"));
-  for(const f of s.flows){const row=body.insertRow();for(const text of [`${f.source} → ${f.destination}`,`${metricText(f.received,0)} / ${metricText(f.sent,0)}`,`${metricText(f.deliveryRate)}%`,`${metricText(measured(f,"meanDelayMs"))} ms`,`${metricText(measured(f,"jitterMs"))} ms`,metricText(measured(f,"meanHops"))])row.insertCell().textContent=text;byId("metricFlow").add(new Option(`${f.source} → ${f.destination}`,`${f.source}:${f.destination}`));}
-  drawMetrics();
+  for(const original of s.flows){const f=offered(original);const row=body.insertRow();for(const text of [`${f.source} → ${f.destination}`,`${metricText(f.received,0)} / ${metricText(f.attempted,0)}`,`${metricText(f.deliveryRate)}%`,`${metricText(measured(f,"meanDelayMs"))} ms`,`${metricText(measured(f,"jitterMs"))} ms`,metricText(measured(f,"meanHops"))])row.insertCell().textContent=text;byId("metricFlow").add(new Option(`${f.source} → ${f.destination}`,`${f.source}:${f.destination}`));}
+  showResearchMetrics(s);drawMetrics();
 }
 function drawMetrics(){
   const result=nativeUI.result;if(!result?.summary)return;
   const chart=byId("qosChart"),c=chart.getContext("2d"),w=chart.width,h=chart.height,type=value("metricSeries"),flow=value("metricFlow"),groups=new Map();
   for(const r of result.series||[]){if(flow!=="all"&&flow!==`${r[1]}:${r[2]}`)continue;let g=groups.get(r[0]);if(!g){g={time:r[0],v:0,rx:0};groups.set(r[0],g);}if(type==="delay"){g.v+=r[7]*r[4];g.rx+=r[4];}else g.v+=r[type==="throughput"?6:type==="dropped"?5:8];}
-  const points=[...groups.values()].map(g=>[g.time,type==="delay"?(g.rx?g.v/g.rx:null):g.v]);c.clearRect(0,0,w,h);c.font="20px sans-serif";c.fillStyle="#aebed2";
+  let points=[...groups.values()].map(g=>[g.time,type==="delay"?(g.rx?g.v/g.rx:null):g.v]);if(type.startsWith("control")){points=[];let previous=null;for(const row of result.controlSeries||[]){const elapsed=row[0]-(previous?.[0]||0),index=type==="controlBytes"?5:4,delta=row[index]-(previous?.[index]||0);points.push([row[0],type==="controlBytes"?delta*8/elapsed/1e6:delta]);previous=row;}}
+  c.clearRect(0,0,w,h);c.font="20px sans-serif";c.fillStyle="#aebed2";
   const valid=points.filter(p=>p[1]!==null),max=Math.max(1,...valid.map(p=>p[1])),end=result.config.simTimeLimit,left=70,top=20,bottom=h-40;
   c.strokeStyle="#344458";c.beginPath();c.moveTo(left,top);c.lineTo(left,bottom);c.lineTo(w-15,bottom);c.stroke();c.fillText(metricText(max),4,top+16);c.fillText("0",left-22,bottom);c.fillText(`${metricText(end)} s`,w-100,h-6);
   c.strokeStyle="#57c9e8";c.lineWidth=2;c.beginPath();let pen=false;for(const [t,v]of points){if(v===null){pen=false;continue;}const x=left+t/end*(w-left-15),y=bottom-v/max*(bottom-top);if(pen)c.lineTo(x,y);else c.moveTo(x,y);pen=true;}c.stroke();
@@ -174,12 +183,14 @@ byId("metricSeries").onchange=drawMetrics;byId("metricFlow").onchange=drawMetric
 window.addEventListener("sim-result",e=>showMetrics(e.detail));window.addEventListener("sim-clear",()=>showMetrics(null));window.addEventListener("sim-csv",e=>showMetrics(e.detail.matchesMap?resultMeta:null));
 const comparisonInputs={};
 function showComparison(a,b){
-  const sa=a.summary,sb=b.summary;const ca=a.config,cb=b.config;
+  const sa=offered(a.summary),sb=offered(b.summary);const ca=a.config,cb=b.config;
+  const verified=a.manifest.format==="leo-native-replay-v3"&&b.manifest.format==="leo-native-replay-v3"&&sa.processingMode==="neutral"&&sb.processingMode==="neutral"&&sa.controlMode===sb.controlMode&&sa.jitterModel===sb.jitterModel&&a.manifest.physicalEventsHash===b.manifest.physicalEventsHash;
   const sameTraffic=sa.trafficHash===sb.trafficHash,ha=a.manifest.environmentHash,hb=b.manifest.environmentHash;
-  byId("comparisonStatus").textContent=(ha&&ha===hb&&sameTraffic)?"동일한 환경·송신 조건입니다.":sameTraffic?"송신 조건은 동일합니다. 환경 설정 차이를 확인하세요.":"송신 조건이 다릅니다.";
+  byId("comparisonStatus").textContent=(verified&&ha&&ha===hb&&sameTraffic)?"동일한 환경·송신 조건입니다.":sameTraffic?"송신 조건은 동일합니다. 환경 설정 차이를 확인하세요.":"송신 조건이 다릅니다.";
   const content=byId("comparisonContent");content.replaceChildren();const table=node("table"),head=table.createTHead().insertRow();for(const t of ["지표",`${sa.algorithm} (기준)`,`${sb.algorithm} (비교)`,"차이"])head.append(node("th",{},t));
   const body=table.createTBody();for(const key of Object.keys(metricLabels)){const av=measured(sa,key),bv=measured(sb,key),row=body.insertRow();for(const text of [metricLabels[key],metricText(av),metricText(bv),av==null||bv==null?"—":metricText(bv-av)])row.insertCell().textContent=text;}
   content.append(table);
+  const settings=node("details");settings.append(node("summary",{},"알고리즘 설정 차이"));for(const key of new Set([...Object.keys(a.manifest.algorithmSettings||{}),...Object.keys(b.manifest.algorithmSettings||{})])){const av=a.manifest.algorithmSettings?.[key],bv=b.manifest.algorithmSettings?.[key];if(av!==bv)settings.append(node("p",{class:"quiet"},`${key}: ${av??"—"} → ${bv??"—"}`));}content.append(settings);
   const capture=node("button",{type:"button"},"기준 경로를 혼잡 설정에 사용");capture.onclick=()=>{const route=a.routes[0];if(!route){byId("comparisonStatus").textContent="기준 결과에 경로가 없습니다.";return;}nativeUI.baseline={runId:a.runId,route:route[6],time:route[0]};byId("comparisonStatus").textContent=`기준 경로 ${route[6].join(" → ")} 선택됨`;render();};content.append(capture);
 }
 async function readComparisonFolder(files){
@@ -203,3 +214,17 @@ function drawScenarioOverlay(snapshot,time){
 }
 if(location.protocol==="file:")byId("btnSettings").hidden=true;
 if(typeof resultMeta!=="undefined"&&resultMeta)showMetrics(resultMeta);
+
+function readEventCsv(text){const rows=text.replace(/^\uFEFF/,"").trim().split(/\r?\n/);if(rows.shift()!=="time,event,satA,satB")throw Error("CSV 열: time,event,satA,satB");return rows.map(row=>{const[t,event,a,b]=row.split(",");return{time:Number(t),event:({fail:"failure",down:"failure",up:"restore"})[event]||event,a:Number(a),b:Number(b)};});}
+function offered(s){if((s.metricVersion||0)>=3||!Number.isFinite(s.attempted))return s;return{...s,deliveryRate:s.attempted?100*s.received/s.attempted:0,dropped:s.dropped+(s.noUplink??s.attempted-s.sent)};}
+function showResearchMetrics(s){
+  let detail=byId("researchMetrics");if(detail)detail.remove();if(s.metricVersion!==3)return;
+  detail=node("details",{id:"researchMetrics"});detail.append(node("summary",{},"제어 통신·연산·복구"));
+  const grid=node("div",{class:"metric-grid"});for(const [name,v]of Object.entries({"제어 프레임":s.control?.hopAccepted,"제어 전송 (MB)":s.control?.wireBytes/1e6,"제어 폐기":s.control?.dropped,"간선 검사":s.operations?.edgeChecks,"라벨 확장":s.operations?.labelExpand,"재계산":s.replanned})){const e=node("div");e.append(node("small",{},name),node("strong",{},metricText(v)));grid.append(e);}detail.append(grid);
+  for(const [name,time]of Object.entries(s.computeMs||{}))detail.append(node("p",{class:"quiet"},`${name}: ${metricText(time)} ms`));
+  for(const event of s.recovery||[]){detail.append(node("p",{},`${event.time}s · ${event.a}–${event.b} · ${event.restore?"재연결":"단절"}`));detail.append(node("p",{class:"quiet"},`감지 ${event.detectedSeconds==null?"미감지":metricText(event.detectedSeconds)+"s"} · 정보 수렴 ${event.convergenceSeconds==null?"미수렴":metricText(event.convergenceSeconds)+"s"} (${event.appliedNodes}/${event.expectedNodes})`));for(const f of event.flows)detail.append(node("p",{class:"quiet"},`${f.source}→${f.destination}: ${!f.affected?"영향 경로 없음":f.recoverySeconds==null?"관측 종료 · 미복구":metricText(f.recoverySeconds)+"s"}`));}
+  byId("nativeMetrics").append(detail);
+}
+byId("btnExperiment").onclick=async()=>{try{const response=await fetch(`/api/config?config=${encodeURIComponent(cfgNameSel.value)}`),cfg=await response.json();if(!response.ok)throw Error(cfg.error);const area=byId("experimentAlgorithms");area.replaceChildren();for(const [id,label]of Object.entries(cfg.capabilities.algorithms)){const e=node("label",{class:"check-field"});e.append(node("input",{type:"checkbox",class:"experiment-algorithm",value:id,checked:true}),document.createTextNode(label));area.append(e);}byId("experimentConditions").textContent=`${cfg.activeConfig} · ${cfg.simTimeLimit}s · 시드 ${cfg.seed}`;byId("experimentError").textContent="";byId("experimentDialog").showModal();}catch(e){setStatus(e.message);}};
+byId("experimentForm").onsubmit=e=>{e.preventDefault();const selected=[...document.querySelectorAll(".experiment-algorithm:checked")].map(e=>e.value);if(!selected.length){byId("experimentError").textContent="알고리즘을 선택하세요.";return;}byId("experimentDialog").close();runNative(selected);};
+if(location.protocol==="file:")byId("btnExperiment").hidden=true;

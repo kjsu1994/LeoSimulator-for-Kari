@@ -87,7 +87,7 @@ FIELDS=[
  ('csibComputeDelay','CSIB 계산 지연 (s)','*.satellite[*].net.routing.csibComputeDelay','number',0,0,3600),
  ('csibReportProcDelay','보고 처리 지연 (s)','*.satellite[*].net.routing.csibReportProcDelay','number',0,0,3600),
  ('csibHopProcDelay','CSIB 홉 처리 지연 (s)','*.satellite[*].net.routing.csibHopProcDelay','number',0,0,3600),
- ('csibMessageBytes','CSIB 크기 (B)','*.satellite[*].net.routing.csibMessageBytes','int',0,0,10000000),
+ ('csibMessageBytes','CSIB 최소 크기 (B, 0=자동)','*.satellite[*].net.routing.csibMessageBytes','int',0,0,10000000),
  ('csibDetectDelay','CSIB 장애 감지 (s, -1=자동)','*.satellite[*].net.routing.csibDetectDelay','number',-1,-1,3600),
  ('slsInterval','SLS 간격 (s)','*.topologyControl.slsInterval','number',.2,TICK,3600),
  ('slsMissCount','SLS 누락 횟수','*.topologyControl.slsMissCount','int',3,1,10000),
@@ -170,7 +170,7 @@ def configuration(cfg):
             uniform=re.fullmatch(r'uniform\((.+),(.+)\)',start)
             if uniform:st['startRange']=[number(x,variables) for x in uniform.groups()]
             else:st['startTime']=number(start,variables)
-        if st['sendInterval']<TICK or st['packetSize']<1 or st['packetSize']!=int(st['packetSize']) or st['dstStation']>=count or (st['enabled'] and st['dstStation']==i) or st['dstType'] not in ('station','mobile','any'):raise ValueError('Invalid traffic at station '+str(i))
+        if st['sendInterval']<TICK or not 1<=st['packetSize']<=2147483623 or st['packetSize']!=int(st['packetSize']) or st['dstStation']>=count or (st['enabled'] and st['dstStation']==i) or st['dstType'] not in ('station','mobile','any'):raise ValueError('Invalid traffic at station '+str(i))
         if abs(st['lat'])>90 or abs(st['lon'])>180 or st['speed']<0 or not 0<=st['start']<=1 or st.get('startTime',0)<0 or st['endTime']<0:raise ValueError('Invalid station coordinates/time')
         if 'route' in st and (len(st['route'])<2 or any(len(x)!=2 or abs(x[0])>90 or abs(x[1])>180 for x in st['route'])):raise ValueError('Invalid mobile route')
         if st['dstStation'] < -1 or st['gapThreshold']<0 or ('startRange' in st and not 0<=st['startRange'][0]<=st['startRange'][1]):raise ValueError('Invalid traffic window')
@@ -194,6 +194,16 @@ def configuration(cfg):
     c['routeRecording']=string('LeoDijkstra.native.routeRecording','changes' if c['numSatellites']>=1000 else 'full')
     if c['routeRecording'] not in ('changes','full'):raise ValueError('Unknown recording mode')
     c['packetTrace']=boolean('LeoDijkstra.native.packetTrace')
-    c['variables']=variables;c['capabilities']=capabilities();c['normalizedVersion']=2
+    for key,default in [('processingMode','neutral'),('controlMode','packet'),('jitterModel','packet'),('islMode','fixed')]:
+        c[key]=string('LeoDijkstra.native.'+key,default)
+    for key,choices in {'processingMode':('neutral','assumed'),'controlMode':('packet','time'),'jitterModel':('packet','cost'),'islMode':('fixed','scheduled')}.items():
+        if c[key] not in choices:raise ValueError('Unknown '+key)
+    for key,default in [('controlRefresh',5),('controlTimeout',3),('controlHeaderBytes',32),('controlRecordBytes',48)]:
+        c[key]=num('LeoDijkstra.native.'+key,default)
+        if c[key]<(1 if key.endswith('Bytes') else TICK) or c[key]>1000000 or (key.endswith('Bytes') and int(c[key])!=c[key]):raise ValueError('Invalid '+key)
+    c['islScheduleFile']=string('LeoDijkstra.native.islScheduleFile','')
+    c['failureRouteSrc']=int(num('LeoDijkstra.mapDataSource.failureRouteSrc',-1));c['failureRouteDst']=int(num('LeoDijkstra.mapDataSource.failureRouteDst',-1))
+    c['modelVersion']='leo-research-3';c['metricVersion']=3
+    c['variables']=variables;c['capabilities']=capabilities();c['normalizedVersion']=3
     c['sweeps']={name:[number(x) for x in values.split(',')] for entry in entries for name,values in re.findall(r'\$\{(\w+)=([^}]+)\}',entry['v'])}
     return c

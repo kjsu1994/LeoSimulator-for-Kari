@@ -13,6 +13,8 @@ import subprocess
 import threading
 import time
 import uuid
+import tempfile
+import copy
 
 JOBS={}
 LOCK=threading.Lock()
@@ -94,15 +96,57 @@ def load_external_inputs(cfg,ini_path):
             rows=list(csv.DictReader(file))
         cfg['failureReplayEvents'] += [{'time':float(r['time']),'event':r['event'],'a':int(r['satA']),'b':int(r['satB'])} for r in rows]
     for e in cfg['failureReplayEvents']:
+        if isinstance(e,dict) and e.get('event')=='fail':e['event']='failure'
         if not isinstance(e,dict) or e.get('event') not in ('failure','restore') or not 0<=float(e.get('time',-1))<=cfg['simTimeLimit'] or any(not isinstance(e.get(k),int) or not 0<=e[k]<cfg['numSatellites'] for k in ('a','b')) or e['a']==e['b']:raise ValueError('Invalid failure replay')
     cfg['failureReplayEvents'].sort(key=lambda e:e['time'])
+    cfg['scheduledEvents']=list(scenario.get('scheduled_events',[])) if cfg.get('islMode')=='scheduled' else []
+    if cfg.get('islMode')=='scheduled' and cfg.get('islScheduleFile'):
+        with path(cfg['islScheduleFile']).open(encoding='utf-8-sig',newline='') as file:
+            for row in csv.DictReader(file):cfg['scheduledEvents'].append({'time':float(row['time']),'event':row['event'],'a':int(row['satA']),'b':int(row['satB']),'cause':'scheduled'})
+    if cfg.get('islMode')=='scheduled' and not cfg['scheduledEvents']:raise ValueError('Select an ISL schedule')
+    n=cfg['numSatellites'];planes=cfg['planes'];per=n//planes;edges=set()
+    for u in range(n):
+        q,j=divmod(u,per)
+        for enabled,v in [(not cfg['intraDisabled'],q*per+(j+1)%per),(not cfg['interDisabled'],(j+cfg['phasing'])%per if q==planes-1 else (q+1)*per+j)]:
+            if enabled:edges.add(tuple(sorted((u,v))))
+    for e in cfg['scheduledEvents']+cfg['failureReplayEvents']:
+        e['event']={'fail':'failure','down':'failure','up':'restore'}.get(e['event'],e['event'])
+        if e in cfg['scheduledEvents']:e['cause']='scheduled'
+        if not isinstance(e.get('time'),(float,int)) or not math.isfinite(e['time']) or not 0<=e['time']<=cfg['simTimeLimit'] or e['event'] not in ('failure','restore') or type(e.get('a'))!=int or type(e.get('b'))!=int or tuple(sorted((e['a'],e['b']))) not in edges:raise ValueError('Event is outside the fixed ISL grid')
     cfg['externalInputs']={}
-    for key in ('scenarioFile','failureReplay'):
+    for key in ('scenarioFile','failureReplay','islScheduleFile'):
         if cfg.get(key):
             source=path(cfg[key]);cfg['externalInputs'][key]={'path':str(source),'text':source.read_text(encoding='utf-8-sig')}
     return cfg
 
 def new_id():return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-')+uuid.uuid4().hex
+
+def prepare(base,cfg,cancel=None):
+    """Resolve physical events once using the independent propagation-only reference."""
+    kernel=hashlib.sha256((Path(base)/'engine/engine.exe').read_bytes()).hexdigest()
+    if cfg.get('commonKernelHash') not in (None,kernel):raise ValueError('Engine changed during experiment')
+    cfg=copy.deepcopy(cfg);cfg['commonKernelHash']=kernel
+    if cfg.get('physicalPrepared'):return cfg
+    cancel=cancel or threading.Event()
+    with tempfile.TemporaryDirectory(prefix='leo-physical-') as tmp:
+        folder=Path(tmp);file=folder/'input.json';file.write_text(json.dumps(cfg,ensure_ascii=False,allow_nan=False),encoding='utf-8')
+        with (folder/'prepare.log').open('wb') as log:
+            process=subprocess.Popen([str(Path(base)/'engine/engine.exe'),str(file),str(folder),'--prepare'],stdout=log,stderr=subprocess.STDOUT,creationflags=NO_WIN)
+            try:
+                while process.poll() is None:
+                    if cancel.wait(.1):raise InterruptedError('실행을 중지했습니다.')
+                    if memory_bytes(process)>4*1024**3:raise ValueError('Preparation exceeded 4GiB')
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    try:process.wait(timeout=1)
+                    except subprocess.TimeoutExpired:process.kill();process.wait(timeout=1)
+        if process.returncode:raise ValueError((folder/'prepare.log').read_text(encoding='utf-8',errors='replace')[-4000:])
+        events=json.loads((folder/'physical-events.json').read_text())
+    if hashlib.sha256((Path(base)/'engine/engine.exe').read_bytes()).hexdigest()!=kernel:raise ValueError('Engine changed during preparation')
+    cfg['physicalEvents']=events;cfg['physicalPrepared']=True
+    cfg['physicalEventsHash']=hashlib.sha256(json.dumps(events,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    return cfg
 
 def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,variables=None,frozen=None):
     from result_bundle import make_native_bundle,write_bundle
@@ -112,6 +156,7 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
             cfg=load_external_inputs(read_config(config_name,variables=variables),ini)
             inputs={p.relative_to(settings).as_posix():p.read_bytes() for p in Path(settings).rglob('*.ini') if not p.name.startswith('.')}
     else:cfg,inputs=frozen
+    cfg=prepare(base,cfg,cancel)
     folder=base/'data/runs'/run_id;folder.mkdir(parents=True,exist_ok=False)
     (folder/'engine-input.json').write_text(json.dumps(cfg,ensure_ascii=False,allow_nan=False),encoding='utf-8')
     start=time.monotonic();peak=0
@@ -136,8 +181,11 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
     profile=json.loads((base/'replay-model.json').read_text(encoding='utf-8'))
     bundle,payload=make_native_bundle(inputs,folder,config_name,profile['modelHash'],cfg,run_id)
     build=base/'engine/build-info.json'
-    if build.exists():bundle['manifest']['build']=json.loads(build.read_text())
-    bundle['manifest']['engine']['sha256']=hashlib.sha256(executable.read_bytes()).hexdigest()
+    if build.exists():
+        info=json.loads(build.read_text());
+        if info['sha256']!=cfg['commonKernelHash']:raise ValueError('Engine build metadata changed')
+        bundle['manifest']['build']=info
+    bundle['manifest']['engine']['sha256']=cfg['commonKernelHash']
     write_bundle(folder,bundle,payload)
     result={'ok':True,'runId':run_id,'bundle':bundle}
     (folder/'result.json').write_text(json.dumps(result,ensure_ascii=False,allow_nan=False),encoding='utf-8')
@@ -145,19 +193,33 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
     pointer=base/'data/latest.json';tmp=pointer.with_suffix('.tmp');tmp.write_text(json.dumps({'runId':run_id}),encoding='utf-8');os.replace(tmp,pointer)
     return result
 
-def start(base,settings,ini,name,read_config,variables=None):
+def start(base,settings,ini,name,read_config,variables=None,algorithms=None):
     # Validate before accepting the job; a rejected request creates no run folder.
     with CONFIG_LOCK:
         cfg=load_external_inputs(read_config(name,variables=variables),ini)
         inputs={p.relative_to(settings).as_posix():p.read_bytes() for p in Path(settings).rglob('*.ini') if not p.name.startswith('.')}
+    from native_engine import ALGORITHMS
+    if algorithms is not None and (not isinstance(algorithms,list) or not algorithms or len(set(algorithms))!=len(algorithms) or any(a not in ALGORITHMS for a in algorithms)):raise ValueError('Select valid algorithms')
     with LOCK:
         if any(j['status'] in ('queued','running','stopping') for j in JOBS.values()):raise ValueError('다른 계산이 실행 중입니다.')
         run_id=new_id();event=threading.Event();job={'runId':run_id,'status':'queued','cancel':event,'base':str(base)};JOBS[run_id]=job
     def work():
-        job['status']='running';job['started']=time.monotonic()
+        job['status']='running';job['phase']='preparing';job['started']=time.monotonic();job['completedRuns']=[]
         try:
-            result=execute(base,settings,ini,name,read_config,run_id,event,variables,(cfg,inputs))
-            job['status']='completed';job['result']=result
+            common=prepare(base,cfg,event);common['experimentId']=run_id
+            folder=Path(base)/'data/experiments'/run_id;folder.mkdir(parents=True,exist_ok=False)
+            (folder/'common.json').write_text(json.dumps(common,ensure_ascii=False,allow_nan=False,indent=2),encoding='utf-8')
+            (folder/'physical-events.json').write_text(json.dumps(common['physicalEvents'],indent=2),encoding='utf-8')
+            job['phase']='running';selected=algorithms or [common['algorithm']];job['totalRuns']=len(selected)
+            for algorithm in selected:
+                if event.is_set():raise InterruptedError('실행을 중지했습니다.')
+                child=copy.deepcopy(common);child['algorithm']=algorithm;child['routingType']='Sat_Net_McsrRouting' if algorithm.startswith('mcsr-') else 'Sat_Net_DijkstraRouting';child['metric']='hop' if algorithm=='dijkstra-hop' else 'delay'
+                child_id=new_id() if algorithms is not None else run_id;job['currentRunId']=child_id
+                result=execute(base,settings,ini,name,read_config,child_id,event,variables,(child,inputs))
+                job['completedRuns'].append({'runId':child_id,'algorithm':algorithm})
+            manifest={'experimentId':run_id,'physicalEventsHash':common['physicalEventsHash'],'runs':job['completedRuns']}
+            (folder/'manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
+            job['status']='completed';job['result']=manifest if algorithms is not None else result
         except InterruptedError as e:job.update(status='cancelled',error=str(e))
         except Exception as e:job.update(status='failed',error=str(e))
     thread=threading.Thread(target=work,daemon=True);job['thread']=thread;thread.start()
@@ -168,7 +230,7 @@ def state(run_id):
     if not job:raise ValueError('알 수 없는 실행입니다.')
     out={k:v for k,v in job.items() if k not in ('cancel','thread','started','base')}
     if 'started' in job:out['elapsedSeconds']=time.monotonic()-job['started']
-    try:out['progress']=json.loads((Path(job['base'])/'data/runs'/run_id/'progress.json').read_text())
+    try:out['progress']=json.loads((Path(job['base'])/'data/runs'/job.get('currentRunId',run_id)/'progress.json').read_text())
     except (OSError,ValueError):pass
     return out
 

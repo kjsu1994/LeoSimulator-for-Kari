@@ -28,11 +28,14 @@ def run_matrix(output):
             finally:
                 if process.poll() is None:process.kill();process.wait()
         if process.returncode:raise RuntimeError((folder/'run.log').read_text(errors='replace'))
+        assert hashlib.sha256(exe.read_bytes()).hexdigest()==binary_hash,'Engine changed during validation'
         summary=json.loads((folder/'summary.json').read_text())
         assert summary['attempted']==summary['sent']+summary['noUplink']
-        assert summary['sent']==summary['received']+summary['dropped']+summary['inFlight']
+        assert summary['attempted']==summary['received']+summary['dropped']+summary['inFlight']
         assert summary['received']>0 and summary['maxQueuePackets']<=500
-        result={'duration':duration,'rateMbps':rate,'algorithm':algorithm,'binarySHA256':binary_hash,'elapsedSeconds':time.monotonic()-start,'peakMemoryBytes':peak,'summary':summary}
+        control=summary.get('control',{});assert control.get('inFlight',0)>=0
+        physical_hash=hashlib.sha256((folder/'physical-events.json').read_bytes()).hexdigest()
+        result={'physicalEventsHash':physical_hash,'duration':duration,'rateMbps':rate,'algorithm':algorithm,'binarySHA256':binary_hash,'elapsedSeconds':time.monotonic()-start,'peakMemoryBytes':peak,'summary':summary}
         result_file.write_text(json.dumps(result,indent=2));return result
     smoke=[(r,a,10) for r in range(10,61,5) for a in ALGORITHMS]
     full=[(r,a,600) for r in (10,35,60) for a in ALGORITHMS]
@@ -45,6 +48,7 @@ def run_matrix(output):
         for rate in (range(10,61,5) if duration==10 else (10,35,60)):
             hashes={r['summary']['trafficHash'] for r in records if r['duration']==duration and r['rateMbps']==rate}
             assert len(hashes)==1,(duration,rate,hashes)
+            physical={r['physicalEventsHash'] for r in records if r['duration']==duration and r['rateMbps']==rate};assert len(physical)==1
     print('ACCEPTANCE PASSED:',len(cases),'runs;',output,flush=True)
 
 def main():

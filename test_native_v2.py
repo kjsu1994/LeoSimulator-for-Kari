@@ -59,7 +59,7 @@ class EngineV2Tests(unittest.TestCase):
             result=subprocess.run([self.exe,str(path/'input.json'),str(path)],capture_output=True,text=True,encoding='utf-8',timeout=120)
             self.assertEqual(result.returncode,0,result.stderr)
             summary=json.loads((path/'summary.json').read_text())
-            self.assertEqual(summary['sent'],summary['received']+summary['dropped']+summary['inFlight'])
+            self.assertEqual(summary['attempted'],summary['received']+summary['dropped']+summary['inFlight'])
             self.assertEqual(summary['attempted'],summary['sent']+summary['noUplink'])
             return summary,{p.name:p.read_text(encoding='utf-8') for p in path.iterdir() if p.suffix in ('.csv','.jsonl')}
     def single(self):
@@ -118,7 +118,7 @@ class JobV2Tests(unittest.TestCase):
             while run_manager.state(identifier)['status'] in ('queued','running'):
                 self.assertLess(time.monotonic(),deadline);time.sleep(.05)
             state=run_manager.state(identifier);self.assertEqual(state['status'],'completed',state.get('error'))
-            bundle=state['result']['bundle'];self.assertEqual(bundle['manifest']['format'],'leo-native-replay-v2')
+            bundle=state['result']['bundle'];self.assertEqual(bundle['manifest']['format'],'leo-native-replay-v3')
             self.assertEqual(bundle['files']['config/simulations/Dijkstra132/omnetpp.ini'].encode(),before)
             for name,digest in bundle['manifest']['files'].items():self.assertEqual(hashlib.sha256(bundle['files'][name].encode()).hexdigest(),digest)
             self.assertTrue(compare_bundles(bundle,bundle)['comparable'])

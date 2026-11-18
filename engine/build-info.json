@@ -1,10 +1,11 @@
 {
-  "version": "2.0.0",
+  "version": "3.0.0",
   "compiler": "x86_64-w64-mingw32-g++ 13-win32",
   "sources": {
-    "algorithms.h": "ca03080ea13399958b7a14ed5b7240e194730565ac38e9e373c11d8f6ce1174f",
+    "algorithms.h": "3087b79cd11c1099898db868a7f9071bd43ea1093efd84c5d8009f1c54d7f341",
+    "control.h": "6ffeee2f0c0a143facd0e0d8e1accc9a9167abedf4acb37fec20e3bb4bb7858b",
     "geometry.h": "524bd622000a99eb99b722c77551dbace1af297dcb0211bb55d5524e81f91c72",
-    "main.cpp": "08086b3a4e41a46ecb2cea608abf5ae3c2ca6cc93fc599c724e8374488b446ad",
+    "main.cpp": "6f3e02abe02b2c7acc432137e0f55d7350ad6af31a925ef0e2e6d0237e8f8058",
     "test_algorithms.cpp": "408d6ff02b7d34e2a622d1fa7b689d4d22302e425b12b357e98f7da4de0d26af",
     "tests/reference/test_congestion.cpp": "262f948fe32bf592b27adc7480f9addb1477222d794c4e1e061da6f3b9024f10",
     "tests/reference/test_csib.cpp": "cb38bcdd7b25b81c1cbe70633d45c9ec9f26edc1d6f9560a9f29c1893f68ea3e",
@@ -49,5 +50,5 @@
     "vendor/routing/mcsr/types.h": "96fca3d02058b69d961093ed7f3d64b3460ab841fdd950eee2cc5878406629fa",
     "vendor/routing/mcsr/wave.h": "bb44c1d5cc9b741c1a6a3b2ad4daf53fae8f76307e82733fdad0cbf35c309067"
   },
-  "sha256": "2ab4febede0d747aaa49809d3abbf0191386e39525e9f40233fb7b38ee5728b1"
+  "sha256": "7be2f71c9005663edd23dbb50cb136681c71c003d79399d29f2cf79437e34f1a"
 }

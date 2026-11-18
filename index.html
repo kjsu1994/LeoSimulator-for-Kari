@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>LEO Network Simulator</title>
-  <link rel="stylesheet" href="style.css?v=20261117-native-2">
+  <link rel="stylesheet" href="style.css?v=20261117-research-3">
 </head>
 <body>
   <header class="topbar">
@@ -100,7 +100,7 @@
         </div>
         <p id="runModeHint" class="mode-hint" hidden>HTML은 저장된 결과를 재생하는 모드입니다. 설정 편집과 새 실행은 sim-ui.exe 또는 start_ui.bat으로 이용하세요.</p>
         <div id="runnerActions" class="runner-actions">
-          <button id="btnRunSim" type="button" class="btn-primary">실행</button><button id="btnStopSim" type="button" hidden>중지</button><progress id="runProgress" max="1" value="0" hidden aria-label="계산 진행률"></progress>
+          <button id="btnRunSim" type="button" class="btn-primary">실행</button><button id="btnExperiment" type="button">비교 실행</button><button id="btnStopSim" type="button" hidden>중지</button><progress id="runProgress" max="1" value="0" hidden aria-label="계산 진행률"></progress>
         </div>
         <a id="resultFiles" hidden download></a>
         <div id="runStatus" class="run-status" hidden></div>
@@ -116,9 +116,9 @@
       <section class="card native-metrics" id="nativeMetrics" hidden>
         <div class="runner-head"><span>수신 결과</span><button id="btnCompare" type="button">실행 비교</button></div>
         <div id="metricValues" class="metric-grid"></div>
-        <div class="chart-controls"><select id="metricFlow" aria-label="통계 흐름"></select><select id="metricSeries" aria-label="그래프 지표"><option value="throughput">처리량 (Mbps)</option><option value="delay">수신 지연 (ms)</option><option value="dropped">폐기 (개)</option><option value="queue">대기 패킷</option></select></div>
+        <div class="chart-controls"><select id="metricFlow" aria-label="통계 흐름"></select><select id="metricSeries" aria-label="그래프 지표"><option value="throughput">처리량 (Mbps)</option><option value="delay">수신 지연 (ms)</option><option value="dropped">폐기 (개)</option><option value="queue">데이터 대기 패킷</option><option value="controlBytes">제어 전송률 (Mbps)</option><option value="controlDrops">제어 폐기 (개)</option></select></div>
         <canvas id="qosChart" width="800" height="260" aria-label="시간별 성능 그래프"></canvas><div id="chartCaption" class="quiet"></div>
-        <details><summary>흐름별 통계</summary><div class="table-scroll"><table id="flowMetrics"><thead><tr><th>출발→목적</th><th>수신/송신</th><th>전달률</th><th>지연</th><th>지터</th><th>홉</th></tr></thead><tbody></tbody></table></div></details>
+        <details><summary>흐름별 통계</summary><div class="table-scroll"><table id="flowMetrics"><thead><tr><th>출발→목적</th><th>수신/발생</th><th>전달률</th><th>지연</th><th>지터</th><th>홉</th></tr></thead><tbody></tbody></table></div></details>
       </section>
       <div class="card toggles">
         <label><input type="checkbox" id="chkIsl" checked> ISLs</label>
@@ -151,13 +151,14 @@
     </aside>
   </main>
 
-  <script src="data/latest_result.js?v=20261117-native-2"></script>
-  <script src="csv.js?v=20261117-native-2"></script>
-  <script src="bundle.js?v=20261117-native-2"></script>
-  <script src="orbit.js?v=20261117-native-2"></script>
-  <script src="app.js?v=20261117-native-2"></script>
+  <script src="data/latest_result.js?v=20261117-research-3"></script>
+  <script src="csv.js?v=20261117-research-3"></script>
+  <script src="bundle.js?v=20261117-research-3"></script>
+  <script src="orbit.js?v=20261117-research-3"></script>
+  <script src="app.js?v=20261117-research-3"></script>
 <dialog id="settingsDialog"><form id="settingsForm"><div class="dialog-heading"><h2>시나리오 설정</h2><button type="button" data-close="settingsDialog" aria-label="닫기">×</button></div><div id="settingsFields"></div><p id="settingsError" class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="settingsDialog">취소</button><button type="submit" class="btn-primary">INI에 저장</button></div></form></dialog>
 <dialog id="compareDialog"><div class="dialog-heading"><h2>실행 비교</h2><button data-close="compareDialog" aria-label="닫기">×</button></div><div class="compare-controls"><label>기준 실행<select id="baselineRun"></select></label><label>비교 실행<select id="scenarioRun"></select></label><button id="loadComparison" class="btn-primary">비교</button><label class="file-btn">기준 폴더<input id="baselineFolder" type="file" webkitdirectory multiple hidden></label><label class="file-btn">비교 폴더<input id="comparisonFolder" type="file" webkitdirectory multiple hidden></label></div><p id="comparisonStatus" role="status"></p><div id="comparisonContent"></div></dialog>
-<script src="editor.js?v=20261117-native-2"></script>
+<dialog id="experimentDialog"><form id="experimentForm"><div class="dialog-heading"><h2>비교 실행</h2><button type="button" data-close="experimentDialog" aria-label="닫기">×</button></div><div id="experimentAlgorithms" class="editor-grid"></div><p id="experimentConditions" class="quiet" style="padding:0 20px"></p><p id="experimentError" class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="experimentDialog">취소</button><button type="submit" class="btn-primary">실행</button></div></form></dialog>
+<script src="editor.js?v=20261117-research-3"></script>
 </body>
 </html>

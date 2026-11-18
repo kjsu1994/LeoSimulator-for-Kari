@@ -79,7 +79,7 @@ class DataTests(unittest.TestCase):
                 subprocess.run([str(Path(server.BASE_DIR,"engine/engine.exe")),str(file),str(folder)],check=True)
                 outputs.append((folder/"routes.csv").read_bytes())
                 summary=json.loads((folder/"summary.json").read_text())
-                self.assertEqual(summary["sent"],summary["received"]+summary["dropped"]+summary["inFlight"])
+                self.assertEqual(summary["attempted"],summary["received"]+summary["dropped"]+summary["inFlight"])
                 server.parse_routes_csv(outputs[-1].decode())
         self.assertEqual(outputs[0],outputs[1])
 
@@ -103,7 +103,7 @@ class DataTests(unittest.TestCase):
                 file=folder/"input.json";file.write_text(json.dumps(cfg))
                 subprocess.run([str(Path(server.BASE_DIR,"engine/engine.exe")),str(file),str(folder)],check=True)
                 summary=json.loads((folder/"summary.json").read_text())
-                self.assertEqual(summary["sent"],summary["received"]+summary["dropped"]+summary["inFlight"])
+                self.assertEqual(summary["attempted"],summary["received"]+summary["dropped"]+summary["inFlight"])
                 self.assertGreater(summary["sent"],100)
                 if hops==0:
                     self.assertEqual(summary["received"],0)

@@ -103,3 +103,8 @@ program continues to be distributed under GPL-3.0-only with complete source.
 OMNeT++ and INET runtime libraries and headers are not shipped or required.
 The independent adapter, packet scheduler, INI normalization, asynchronous local
 runner and recorded-metric replay are modifications, not an upstream release.
+
+Research adapter revision 3: shared frozen physical inputs, offered-load metrics,
+explicit experimental packet control protocol, packet delay variation, counters
+and v3 replay are local modifications. The supplied MCSR core headers remain
+unchanged. The new control wire model is not a claim of paper/protocol equivalence.

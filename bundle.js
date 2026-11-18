@@ -118,7 +118,7 @@ function readReplayIni(files, entry, selected) {
 }
 async function prepareBundle(bundle) {
   const m=bundle.manifest;
-  if(!m || (m.format!=="leo-native-replay-v2" && (m.format!=="florasat-csv-ini-v1"||m.profile!==REPLAY_MODEL.profile||m.modelHash!==REPLAY_MODEL.modelHash)) || (m.format==="leo-native-replay-v2" && (m.profile!=="leo-native-delta-v2"||m.orbitModelHash!==REPLAY_MODEL.modelHash)))throw new Error("지원하지 않는 실행 결과 또는 원본 모델 버전입니다.");
+  if(!m || (!["leo-native-replay-v2","leo-native-replay-v3"].includes(m.format) && (m.format!=="florasat-csv-ini-v1"||m.profile!==REPLAY_MODEL.profile||m.modelHash!==REPLAY_MODEL.modelHash)) || (["leo-native-replay-v2","leo-native-replay-v3"].includes(m.format) && (m.profile!== (m.format==="leo-native-replay-v3"?"leo-native-delta-v3":"leo-native-delta-v2")||m.orbitModelHash!==REPLAY_MODEL.modelHash)))throw new Error("지원하지 않는 실행 결과 또는 원본 모델 버전입니다.");
   if(!/^[a-zA-Z0-9-]{8,80}$/.test(m.runId)||!m.files||!m.configName||Object.keys(m.overrides||{}).length)throw new Error("Invalid result metadata/overrides");
   const files=new Map(Object.entries(bundle.files||{}));
   for(const [name,expected] of Object.entries(m.files)){
@@ -129,17 +129,19 @@ async function prepareBundle(bundle) {
   }
   if(!Object.hasOwn(m.files,m.entryIni)||!Object.hasOwn(m.files,m.csvPath))throw new Error("Missing required result files");
   const checked=new Map([...files].filter(([name])=>Object.hasOwn(m.files,name)));
-  const native=m.format==="leo-native-replay-v2";
+  const native=["leo-native-replay-v2","leo-native-replay-v3"].includes(m.format);
   if(native && (!m.normalizedPath||!Object.hasOwn(m.files,m.normalizedPath)||!Object.hasOwn(m.files,"summary.json")||!Object.hasOwn(m.files,"network-events.jsonl")||!Object.hasOwn(m.files,"timeseries.csv")))throw new Error("계측 결과 파일이 누락되었습니다.");
   const cfg=native?JSON.parse(checked.get(m.normalizedPath)):readReplayIni(checked,m.entryIni,m.configName),rows=parseRoutesCsv(checked.get(m.csvPath));
-  if(native && (cfg.normalizedVersion!==2||!Array.isArray(cfg.stations)||cfg.numTerminals!==0||!Number.isInteger(cfg.numSatellites)||cfg.numSatellites<6||cfg.numSatellites>20000||cfg.planes<2||cfg.numSatellites%cfg.planes||cfg.altitude<220||cfg.altitude>2000||!Number.isFinite(cfg.simTimeLimit)||cfg.simTimeLimit<=0))throw new Error("지원하지 않는 정규화 설정입니다.");
+  if(native && (![2,3].includes(cfg.normalizedVersion)||!Array.isArray(cfg.stations)||cfg.numTerminals!==0||!Number.isInteger(cfg.numSatellites)||cfg.numSatellites<6||cfg.numSatellites>20000||cfg.planes<2||cfg.numSatellites%cfg.planes||cfg.altitude<220||cfg.altitude>2000||!Number.isFinite(cfg.simTimeLimit)||cfg.simTimeLimit<=0))throw new Error("지원하지 않는 정규화 설정입니다.");
   const summary=native?JSON.parse(checked.get("summary.json")):null;
   const networkEvents=native?checked.get("network-events.jsonl").split(/\r?\n/).filter(Boolean).map(s=>JSON.parse(s)):[];
   let last=-1;for(const e of networkEvents){if(!Number.isFinite(e.time)||e.time<last||e.time<0||e.time>cfg.simTimeLimit)throw new Error("Invalid network timeline");last=e.time;}
   const series=native?checked.get("timeseries.csv").trim().split(/\r?\n/).slice(1).map(s=>s.split(",").map(Number)):[];
   if(series.some(r=>r.length!==9||r.some(v=>!Number.isFinite(v))))throw new Error("Invalid metric series");
+  const controlSeries=native&&checked.has("control-series.csv")?checked.get("control-series.csv").trim().split(/\r?\n/).slice(1).map(s=>s.split(",").map(Number)):[];
+  if(controlSeries.some(r=>r.length!==8||r.some(v=>!Number.isFinite(v))))throw new Error("Invalid control series");
   for(const r of rows)if(r[7]||r[2]>=cfg.stations.length||r[3]>=cfg.stations.length||r[6].some(id=>id>=cfg.numSatellites)||r[0]>cfg.simTimeLimit)throw new Error("CSV does not match supported scenario settings");
-  return {ok:true,routes:rows,states:[],config:cfg,manifest:m,replay:true,summary,networkEvents,series,bundle,runId:m.runId,inputHash:m.inputHash||m.modelHash,csvHash:m.files[m.csvPath],createdAt:m.createdAt};
+  return {ok:true,routes:rows,states:[],config:cfg,manifest:m,replay:true,summary,networkEvents,series,controlSeries,bundle,runId:m.runId,inputHash:m.inputHash||m.modelHash,csvHash:m.files[m.csvPath],createdAt:m.createdAt};
 }
 if(typeof module!=="undefined")module.exports={readReplayIni,prepareBundle,bundlePath,REPLAY_MODEL};
 

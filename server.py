@@ -266,11 +266,12 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
                 return self.send_json(result)
             except (ValueError,OSError,KeyError) as exc:
                 return self.send_json({"error":str(exc)},400)
-        if self.path == "/api/run":
+        if self.path in ("/api/run","/api/experiments"):
             try:
+                if self.path=="/api/experiments" and body.get("algorithms") is None:raise ValueError("Select algorithms")
                 from run_manager import start
                 name=body.get("configName") or read_ini_config()["activeConfig"]
-                return self.send_json(start(BASE_DIR,LEO_DIR,INI_PATH,name,read_ini_config,body.get("variables")),202)
+                return self.send_json(start(BASE_DIR,LEO_DIR,INI_PATH,name,read_ini_config,body.get("variables"),body.get("algorithms") if self.path=="/api/experiments" else None),202)
             except (ValueError,OSError,KeyError) as exc:
                 return self.send_json({"ok":False,"error":str(exc)},400)
         if self.path.startswith("/api/run/") and self.path.endswith("/cancel"):

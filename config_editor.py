@@ -22,6 +22,7 @@ def edit(path,config,changes,read_config,scenario=None):
             'randomFailures':'*.islFailures.randomFailures','randomStart':'*.islFailures.randomStart','randomEnd':'*.islFailures.randomEnd',
             'randomDuration':'*.islFailures.randomDuration','failureSeed':'seed-1-mt','failureKnowledge':'*.topologyControl.failureKnowledge',
             'congestionRefresh':'*.congestion.refreshInterval','congestionBuffer':'*.congestion.queueCapacity','congestionPacketBytes':'*.congestion.packetBytes'}
+    simple.update({key:'*.native.'+key for key in ('processingMode','controlMode','jitterModel','islMode','islScheduleFile','controlRefresh','controlTimeout','controlHeaderBytes','controlRecordBytes')})
     for key,value in changes.items():
         if key in fields:
             f=fields[key];v=number(value)

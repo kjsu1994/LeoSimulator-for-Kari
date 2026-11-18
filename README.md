@@ -71,4 +71,40 @@ Python 검사는 반복 실행·패킷 보존·고부하 큐·최대 홉 폐기�
 설정의 실제 큐 모드는 송신 패킷으로 부하를 생성합니다. 환경 효과 모드는 별도
 지정한 혼잡도·지연·손실을 주입하는 시험이며 결과에 구분해 기록됩니다.
 SRD K/L과 consistent 플러딩은 참조 프로파일과 구별되는 추가 실험 옵션입니다.
-DS·CSIB는 참조 코어의 시간 모델이며 실제 제어 패킷 트래픽은 생성하지 않습니다.
+time 모드의 DS·CSIB는 참조 시간 모델입니다. packet 모드는 아래 독립 실험 규격을 사용합니다.
+
+## 연구 비교 모델 v3
+
+비교 실행은 선택한 INI와 시드로 물리 사건을 먼저 확정한 뒤 알고리즘을 순차 실행합니다.
+data/experiments/<ID>/common.json과 physical-events.json에 공통 입력을 보관하고,
+각 실행은 data/runs/<ID>/에 별도로 보관합니다. route@T는 지정된 고정 출발·목적 흐름의
+전파 지연 최소 기준 경로에서 링크를 정합니다. 실제 알고리즘 경로를 따라 장애를 바꾸지 않습니다.
+모호한 기준 흐름이나 ISL 없는 기준 경로는 준비 단계에서 거부합니다.
+
+신규 결과는 leo-native-replay-v3입니다. 기존 v1/v2는 계속 읽되 같은 계측으로 판정하지 않습니다.
+전달률은 수신/발생이며 접속·경로 선택 실패도 분모와 실패 수에 포함합니다.
+정보 감지·정보 적용·영향 흐름의 사건 후 첫 수신을 구분하며 관측 종료 시 미수렴/미복구를 표시합니다.
+추가 처리 지연은 neutral에서 모두 0이고, 기존 reserveDelay/repairDelay/spfDelay 등은
+assumed에서만 적용합니다. 계산 시간은 호스트 측정이며 시뮬레이션 시간으로 자동 환산하지 않습니다.
+
+실험 모델의 INI 키는 *.native.processingMode = "neutral" 또는 "assumed",
+*.native.controlMode = "packet" 또는 "time", *.native.jitterModel = "packet" 또는 "cost",
+*.native.islMode = "fixed" 또는 "scheduled"입니다. scheduled는 UI에서 CSV를 가져오거나
+*.native.islScheduleFile로 지정합니다. CSV 열은 time,event,satA,satB이며 failure/restore,
+이전 fail, 그리고 down/up을 읽습니다. 고정 격자 밖의 연결은 지원하지 않습니다.
+
+packet 지터의 jitter_ms는 링크 추가 지연의 표준편차입니다. 지연은 0..2√3σ의 균등분포로
+추가되며 평균 √3σ도 지연 비용에 반영됩니다. 라우팅용 J는 관측된 도착 지연 변동이며,
+수신 지터와 구분하고 주입값을 다시 합산하지 않습니다. cost 모드는 라우팅 비용 주입만 합니다.
+
+실제 제어 통신은 독립 실험 규격입니다. 초기 공통 정보는 수렴된 상태로 설치하고 이후를 측정합니다.
+SLS는 기본 0.2초/3회 누락, controlRefresh=5초, controlTimeout=3초입니다.
+메시지 기본 헤더는 controlHeaderBytes=32, 상태 레코드는 controlRecordBytes=48바이트이며
+전송 헤더 24바이트를 추가합니다. 데이터와 제어는 동일 FIFO·용량을 공유합니다.
+Dijkstra와 CSIB 비활성 MCSR은 상태 플러딩을 사용합니다. CSIB 활성 MCSR은 지역 수집,
+상태 자료를 포함한 경계 투표, DS 간 요약, 지역 배포를 사용하며 코어의 DS 선택 함수를 재사용합니다.
+보고 누락은 제한 시간까지 기다리고 투표 자료가 불완전하면 DS를 유지합니다.
+제어 패킷 도착 전 물리 상태를 라우터에 제공하지 않습니다. 실제 제어 규격이 논문과 같다는 주장은 하지 않습니다.
+
+physical-events.json은 실제 물리 전이, control-series.csv는 시간별 누적 제어 계측입니다.
+상세 제어 프레임은 기본적으로 저장하지 않습니다. 원본 순수 코어의 해시와 라이선스는 유지됩니다.
