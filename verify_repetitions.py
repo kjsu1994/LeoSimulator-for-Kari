@@ -20,6 +20,7 @@ def verify(output,final=False):
             time.sleep(.05)
         state=run_manager.state(job['runId']);assert state['status']=='completed',state.get('error')
         report=state['statistics'];assert report['completedRuns']==count*5
+        assert report['inputVariability']['trafficProfiles']==count
         assert report['stage']==('final' if count>=30 else 'pilot')
         for comparison in report['comparisons']:
             metric=next(m for m in comparison['metrics'] if m['name']=='deliveryRate')

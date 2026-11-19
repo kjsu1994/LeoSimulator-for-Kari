@@ -31,5 +31,32 @@ int main(int argc,char **argv){
   x.exits=[](int){return std::vector<mcsr::Planner::Exit>{{2,{.5,1,0}}};};
   DijkstraRouting routing(x);Packet packet;packet.dest=0;auto plan=routing.forward(packet,0);
   assert((plan.path==std::vector<int>{0,1,2}));assert(std::abs(plan.delay-.0035)<1e-12);
+  {
+    auto c=config();c["failureSchedule"]="0-1@1";c["maxHops"]=0;
+    Simulation sim(c,out);while(!sim.events.empty())sim.events.pop();
+    sim.lastPaths[{0,1}]={2,3};
+    sim.lastPaths[{1,0}]={0,1};
+    auto packet=std::make_shared<Packet>();packet->source=0;packet->dest=1;
+    sim.now=ticks(.9);sim.arrive(packet,1,0);
+    sim.now=ticks(1.);sim.fail(0,1);
+    auto index=sim.activeRecovery.at(mcsr::linkKey(0,1));
+    auto &event=sim.recovery[index];
+    assert((event.flows.count({0,1})==1&&event.flows.count({1,0})==0));
+    sim.observeRecovery({0,1},ticks(1.),0,true);
+    assert(sim.recoveryFlowJson(event,{0,1},event.flows.at({0,1}))["firstPacketRecoverySeconds"].is_null());
+    for(int i=0;i<6;i++){
+      double created=1.1+i/3+(i%3)*.1;
+      sim.now=ticks(created);sim.observeRecovery({0,1},sim.now,i+1,false);
+      if(i==3)sim.fail(1,2);
+      sim.now=ticks(created+.05);sim.observeRecovery({0,1},ticks(created),i+1,true);
+      if(i==0){
+        auto &original=sim.recovery[index];auto row=sim.recoveryFlowJson(original,{0,1},original.flows.at({0,1}));
+        assert(!row["firstPacketRecoverySeconds"].is_null()&&row["stableRecoverySeconds"].is_null());
+      }
+    }
+    sim.now=ticks(3.5);sim.fail(0,1,true);
+    auto &original=sim.recovery[index];auto row=sim.recoveryFlowJson(original,{0,1},original.flows.at({0,1}));
+    assert(row["censoredAt"]==3.5&&row["stableRecoverySeconds"]==2.);
+  }
   std::cout<<"Analytic kernel: FIFO, overflow, serialization, propagation, failure ordering, drain passed\n";
 }

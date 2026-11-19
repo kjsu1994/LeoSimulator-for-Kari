@@ -28,6 +28,8 @@ leocongestion::LinkLoadMap zoneLoads(const std::vector<leocongestion::Zone> &zon
       auto &l=out[{u,v}];l.rho=std::max(l.rho,rho);l.extraDelay=std::max(l.extraDelay,q.delay(rho)+z.penaltyDelayMs/1000.);l.jitter=std::max(l.jitter,std::hypot(q.jitter(rho),z.penaltyJitterMs/1000.));}}
   return out;
 }
+constexpr char ENGINE_VERSION[] = "1.0.0";
+constexpr char MODEL_VERSION[] = "leo-research-1.0.0";
 using Tick = long long;
 constexpr double TICKS = 1e11;
 Tick ticks(double seconds) { return llround(seconds*TICKS); }
@@ -285,7 +287,19 @@ public:
   std::unique_ptr<Routing> router;
   std::unique_ptr<ControlPlane> control;
   std::vector<J> physicalEvents;
-  struct Recovery {double time;int a,b;bool up;std::map<std::pair<int,int>,double> flows;std::set<std::pair<int,int>> affected;std::vector<double> applied;double detected=INFINITY,until=INFINITY;};
+  using FlowKey=std::pair<int,int>;
+  struct RecoveryWindow {long long attempted=0,received=0;double lastReceipt=0;};
+  struct RecoveryFlow {double first=INFINITY;std::map<Tick,RecoveryWindow> windows;};
+  struct Recovery {
+    double time;int a,b;bool up;long long lastPacketId;
+    std::map<FlowKey,RecoveryFlow> flows;
+    std::vector<double> applied;
+    double detected=INFINITY,until=INFINITY;
+  };
+  std::map<mcsr::LinkKey,size_t> activeRecovery;
+  std::map<mcsr::LinkKey,std::map<FlowKey,Tick>> lastLinkUse;
+  bool trackRecovery=false;
+  unsigned long long linkRandomDraws=0;
   std::vector<Recovery> recovery;
   double seconds()const{return now/TICKS;}
   double random(){return double(trafficRng())/4294967296.;}
@@ -454,6 +468,7 @@ public:
   std::map<std::string,long long> dropReasons;
   void clearQueue(Link &l,const std::string &reason) {while(!l.queue.empty()){auto p=l.queue.front();l.queue.pop_front();if(!p->control)flow(p).queued--;drop(p,reason);}}
   double uniform(const Packet &p,const Link &l,unsigned salt) {
+    ++linkRandomDraws;
     std::seed_seq seed{unsigned(c.value("seed",0)),unsigned(p.id),unsigned(p.id>>32),unsigned(l.a),unsigned(l.b),unsigned(p.pass),unsigned(p.fragment),salt};std::mt19937 rng(seed);return double(rng())/4294967296.;
   }
   void start(Link &l,const std::shared_ptr<Packet> &p) {
@@ -527,7 +542,33 @@ public:
     }
     transmit(p,node,next);
   }
+  void observeRecovery(const FlowKey &key,Tick created,long long id,bool received) {
+    for(auto [link,index]:activeRecovery){
+      auto &event=recovery[index];auto flow=event.flows.find(key);
+      if(flow==event.flows.end()||id<=event.lastPacketId)continue;
+      auto &state=flow->second;
+      auto &window=state.windows[(created-ticks(event.time))/ticks(1.)];
+      if(received){state.first=std::min(state.first,seconds());++window.received;window.lastReceipt=seconds();}
+      else ++window.attempted;
+    }
+  }
+  J recoveryFlowJson(const Recovery &event,const FlowKey &key,const RecoveryFlow &flow)const {
+    double end=std::isfinite(event.until)?event.until:limit/TICKS;
+    J first=std::isfinite(flow.first)?J(flow.first-event.time):J(nullptr),stable=nullptr;
+    Tick previous=-2;double previousReceipt=0;
+    for(auto [bin,window]:flow.windows){
+      double boundary=event.time+bin+1;
+      if(ticks(boundary)>ticks(end)||window.attempted<3||100*window.received<95*window.attempted)continue;
+      if(bin==previous+1){stable=std::max({boundary,previousReceipt,window.lastReceipt})-event.time;break;}
+      previous=bin;previousReceipt=window.lastReceipt;
+    }
+    return {{"source",key.first},{"destination",key.second},{"affected",true},
+            {"receivedAt",std::isfinite(flow.first)?J(flow.first):J(nullptr)},
+            {"recoverySeconds",first},{"firstPacketRecoverySeconds",first},
+            {"stableRecoverySeconds",stable},{"censoredAt",end}};
+  }
   void arrive(const std::shared_ptr<Packet> &p,int node,int from) {
+    if(trackRecovery&&!p->control&&from<n&&node<n)lastLinkUse[mcsr::linkKey(from,node)][{p->source,p->dest}]=now;
     if(from<n&&node<n){auto l=find(from,node);if(l){double transit=seconds()-p->enqueued/TICKS;if(l->lastTransit>=0)l->jitter+=(std::abs(transit-l->lastTransit)-l->jitter)/16.;l->lastTransit=transit;l->jitterAt=seconds();}}
     if(p->control){
       control->arrived++;control->count(p->control->kind,&ControlCounts::frameArrivals);auto assembly=p->assembly;
@@ -543,7 +584,7 @@ public:
       f.delaySum+=d;double delta=d-f.mean;f.mean+=delta/f.received;f.m2+=delta*(d-f.mean);f.maxDelay=std::max(f.maxDelay,d);f.hops+=std::max(0,p->hops-1);
       if(f.lastTransit>=0)f.jitter+=(std::abs(d-f.lastTransit)-f.jitter)/16.;f.lastTransit=d;
       if(f.lastRx>=0){double gap=seconds()-f.lastRx;f.maxGap=std::max(f.maxGap,gap);if(gap>c["stations"][p->dest].value("gapThreshold",.1))f.outages++;}f.lastRx=seconds();
-      for(auto &e:recovery)if(p->created/TICKS>=e.time&&e.flows.count({p->source,p->dest})&&!std::isfinite(e.flows.at({p->source,p->dest})))e.flows[{p->source,p->dest}]=seconds();
+      if(!activeRecovery.empty())observeRecovery({p->source,p->dest},p->created,p->id,true);
       tracePacket(p,"receive",std::to_string(d));return;
     }
     p->current=node;if(++p->hops>c.value("maxHops",64)){drop(p,"max-hops");return;}dispatch(p,node);
@@ -558,6 +599,7 @@ public:
       if(!candidates.empty())dest=candidates[std::min(candidates.size()-1,size_t(random()*candidates.size()))];
     }
     auto &f=flows[{source,dest}];f.attempted++;if(inMeasurement(now))cohort[{source,dest}].attempted++;long long id=++packetId;
+    if(!activeRecovery.empty())observeRecovery({source,dest},now,id,false);
     for(auto v:{(unsigned long long)id,(unsigned long long)now,(unsigned long long)source,(unsigned long long)dest,(unsigned long long)s["packetSize"].get<int>()})hashValue(v);
     int best;{ComputeTimer measure(context,"access");best=dest<0?-1:router->selectUplink(source,dest);}
     if(best<0){noUplink++;f.sourceDropped++;if(inMeasurement(now))cohort[{source,dest}].sourceDropped++;dropReasons[dest<0?"no-destination":uplinks(source).empty()?"no-access":"no-route-at-source"]++;}
@@ -578,11 +620,30 @@ public:
         for(int i=0;i<n;i++)f.known[i]=(distances[i]<0||(scope>0&&distances[i]>scope))?INFINITY:seconds()+detect+distances[i]*per;
       }
     }
+    auto key=mcsr::linkKey(a,b);
+    Recovery event{seconds(),a,b,restore,packetId};
+    auto previous=activeRecovery.find(key);
+    if(previous!=activeRecovery.end()){
+      auto &prior=recovery[previous->second];prior.until=seconds();
+      if(restore)for(const auto &[flow,state]:prior.flows)event.flows.try_emplace(flow);
+      activeRecovery.erase(previous);
+    }
+    if(!restore){
+      auto used=lastLinkUse.find(key);
+      if(used!=lastLinkUse.end())for(auto [flow,time]:used->second)
+        if(now-time<=ticks(std::max(1.,2*c["stations"][flow.first].value("sendInterval",1.))))event.flows.try_emplace(flow);
+      auto observe=[&](const std::shared_ptr<Packet>& p){if(p&&!p->control)event.flows.try_emplace(FlowKey{p->source,p->dest});};
+      for(auto [u,v]:{std::make_pair(a,b),std::make_pair(b,a)}){
+        auto &link=links[u].at(v);observe(link.current);
+        for(const auto &packet:link.queue)observe(packet);
+      }
+    }
     for(auto [u,v]:{std::make_pair(a,b),std::make_pair(b,a)}){auto &l=links[u].at(v);l.active=restore&&l.nominal;if(!restore){clearQueue(l,"link-down-in-queue");abort(l);}}
     context.islEpoch++;if(!control)context.epoch++;record({{"event",restore?"restore":"failure"},{"a",a},{"b",b},{"cause",cause}});
     physicalEvents.push_back({{"time",seconds()},{"event",restore?"restore":"failure"},{"a",a},{"b",b},{"cause",cause}});
-    for(auto &e:recovery)if(!std::isfinite(e.until)){e.until=seconds();for(auto &[key,t]:e.flows)if(!std::isfinite(t))t=-seconds();}
-    Recovery event{seconds(),a,b,restore,{}};for(auto &[key,f]:flows){event.flows[key]=INFINITY;auto &path=lastPaths[key];for(size_t i=1;i<path.size();i++)if((path[i-1]==a&&path[i]==b)||(path[i-1]==b&&path[i]==a))event.affected.insert(key);for(auto &prior:recovery)if(prior.affected.count(key)&&(prior.flows.at(key)<0||!std::isfinite(prior.flows.at(key))))event.affected.insert(key);}event.applied.assign(n,INFINITY);recovery.push_back(event);
+    event.applied.assign(n,INFINITY);
+    activeRecovery[key]=recovery.size();
+    recovery.push_back(std::move(event));
     failureLog<<seconds()<<','<<(restore?"restore":"failure")<<','<<a<<','<<b<<'\n';
     if(router && !control) {
       if(restore)router->onNetworkEvent({{"event","restore"}});
@@ -636,6 +697,11 @@ public:
 public:
   Simulation(J cfg,const std::string &directory):c(std::move(cfg)),out(directory),n(c["numSatellites"]),g(c["stations"].size()),limit(ticks(c["simTimeLimit"])),trafficRng(c.value("seed",23542)),failureRng(c.value("failureSeed",4242)),sat(n),ground(g),links(n+g) {
     if(n<6||n>20000||g<1||g>5000||limit<=0||c["planes"].get<int>()<2||n%c["planes"].get<int>())throw std::runtime_error("Invalid engine dimensions");
+    if(c.contains("modelVersion")&&c["modelVersion"]!=MODEL_VERSION)throw std::runtime_error("Engine model version mismatch");
+    trackRecovery=!c.value("prepareOnly",false)&&(
+      !c.value("physicalEvents",J::array()).empty()||!c.value("failureReplayEvents",J::array()).empty()||
+      !c.value("scheduledEvents",J::array()).empty()||c.value("randomFailures",0)>0||
+      !c.value("failureSchedule",std::string()).empty()||!c.value("scenario",J::object()).value("entries",J::array()).empty());
     measurementStart=ticks(c.value("warmupSeconds",0.));measurementEnd=limit-ticks(c.value("drainSeconds",0.));
     if(measurementStart<0||measurementEnd>limit||measurementStart>=measurementEnd)throw std::runtime_error("Invalid measurement window");
     measuring=measurementStart>0||measurementEnd<limit;
@@ -695,10 +761,10 @@ public:
       rows.push_back({{"source",key.first},{"destination",key.second},{"attempted",f.attempted},{"sent",f.sent},{"received",f.received},{"dropped",f.dropped+f.sourceDropped},{"sourceDropped",f.sourceDropped},{"inFlight",f.sent-f.received-f.dropped},{"deliveryRate",f.attempted?100.*f.received/f.attempted:0},{"admittedDeliveryRate",f.sent?100.*f.received/f.sent:0},{"offeredDeliveryRate",f.attempted?100.*f.received/f.attempted:0},{"meanDelayMs",1000*f.mean},{"delayStdMs",f.received>1?1000*std::sqrt(f.m2/(f.received-1)):0},{"maxDelayMs",f.maxDelay*1000},{"jitterMs",f.jitter*1000},{"meanHops",f.received?double(f.hops)/f.received:0},{"maxGapSeconds",f.maxGap},{"outages",f.outages},{"throughputMbps",f.bytes*8/(limit/TICKS)/1e6}});}
     if(received+dropped>sent)throw std::runtime_error("Packet conservation violated");
     std::ostringstream hash;hash<<std::hex<<trafficHash;
-    J result={{"engine","leo-native"},{"version","4.1.0"},{"algorithm",c["algorithm"]},{"attempted",attempted},{"sent",sent},{"received",received},{"dropped",dropped+noUplink},{"admittedDropped",dropped},{"inFlight",sent-received-dropped},{"noUplink",noUplink},{"delaySumSeconds",delaySum},{"meanDelayMs",received?1000*delaySum/received:0},{"deliveryRate",attempted?100.*received/attempted:0},{"admittedDeliveryRate",sent?100.*received/sent:0},{"throughputMbps",bytes*8/(limit/TICKS)/1e6},{"maxQueuePackets",maxQueue},{"replanned",replanned},{"reservedSwitches",reserved},{"trafficHash",hash.str()},{"trafficHashAlgorithm","fnv1a64"},{"dropReasons",dropReasons},{"flows",rows},{"routeRecording",c.value("routeRecording",std::string("full"))},{"packetTrace",c.value("packetTrace",false)},{"experimental",c.value("experimental",false)||!c.value("scenario",J::object()).value("entries",J::array()).empty()||!zones.empty()},{"congestionMode",c.value("congestionMode",std::string("actual"))}};
+    J result={{"engine","leo-native"},{"version",ENGINE_VERSION},{"algorithm",c["algorithm"]},{"attempted",attempted},{"sent",sent},{"received",received},{"dropped",dropped+noUplink},{"admittedDropped",dropped},{"inFlight",sent-received-dropped},{"noUplink",noUplink},{"delaySumSeconds",delaySum},{"meanDelayMs",received?1000*delaySum/received:0},{"deliveryRate",attempted?100.*received/attempted:0},{"admittedDeliveryRate",sent?100.*received/sent:0},{"throughputMbps",bytes*8/(limit/TICKS)/1e6},{"maxQueuePackets",maxQueue},{"replanned",replanned},{"reservedSwitches",reserved},{"trafficHash",hash.str()},{"trafficHashAlgorithm","fnv1a64"},{"dropReasons",dropReasons},{"flows",rows},{"routeRecording",c.value("routeRecording",std::string("full"))},{"packetTrace",c.value("packetTrace",false)},{"experimental",c.value("experimental",false)||!c.value("scenario",J::object()).value("entries",J::array()).empty()||!zones.empty()},{"congestionMode",c.value("congestionMode",std::string("actual"))}};
     result["appliedProcessingDelays"]=J::object();result["requestedProcessingDelays"]=J::object();for(auto key:{"reserveDelay","repairDelay","spfDelay","csibComputeDelay","csibReportProcDelay","csibHopProcDelay","floodHopDelay"}){result["requestedProcessingDelays"][key]=c.value(key,0.);result["appliedProcessingDelays"][key]=c.value("processingMode",std::string("neutral"))=="neutral"?0:c.value(key,0.);}
     if(!attempted)result["deliveryRate"]=nullptr;
-    result["controlProtocolVersion"]=2;result["metricVersion"]=4;result["modelVersion"]="leo-research-4";result["processingMode"]=c.value("processingMode",std::string("neutral"));result["controlMode"]=c.value("controlMode",std::string("packet"));result["jitterModel"]=c.value("jitterModel",std::string("packet"));
+    result["controlProtocolVersion"]=2;result["metricVersion"]=4;result["modelVersion"]=MODEL_VERSION;result["linkRandomDraws"]=linkRandomDraws;result["processingMode"]=c.value("processingMode",std::string("neutral"));result["controlMode"]=c.value("controlMode",std::string("packet"));result["jitterModel"]=c.value("jitterModel",std::string("packet"));
     result["computeMs"]=context.computeMs;result["computations"]=context.computations;
     auto &o=context.operations;result["operations"]=J::object();o.each([&](const char* key,std::uint64_t value){result["operations"][key]=value;});
     result["approximation"]={{"labelCap",c.value("labelCap",32)},{"capEvict",o.capEvict},{"capReject",o.capReject},{"limited",o.capEvict+o.capReject>0}};
@@ -710,7 +776,10 @@ public:
     }
     if(control){auto &c=*control;result["control"]={{"generated",c.generated},{"generatedByKind",c.generatedByKind},{"hopAccepted",c.hopAccepted},{"arrived",c.arrived},{"dropped",c.dropped},{"inFlight",c.hopAccepted-c.arrived-c.dropped},{"wireBytes",c.wireBytes},{"busySeconds",c.busySeconds},{"dropReasons",c.droppedByReason},{"byKind",c.byKindJson()}};}
     J events=J::array();for(auto &e:physicalEvents)events.push_back(e);std::ofstream(out+"/physical-events.json")<<events.dump();
-    J recoveries=J::array();for(auto &e:recovery){J rows=J::array();for(auto &[key,t]:e.flows)rows.push_back({{"source",key.first},{"destination",key.second},{"receivedAt",std::isfinite(t)&&t>=0?J(t):J(nullptr)},{"affected",e.affected.count(key)>0},{"recoverySeconds",e.affected.count(key)&&std::isfinite(t)&&t>=0?J(t-e.time):J(nullptr)},{"censoredAt",std::isfinite(e.until)?e.until:limit/TICKS}});double applied=0;int count=0;for(auto t:e.applied)if(std::isfinite(t)){count++;applied=std::max(applied,t);}
+    result["recoveryPolicy"]={{"version",1},{"windowSeconds",1},{"consecutiveWindows",2},{"minimumPacketsPerWindow",3},{"minimumDeliveryRatePct",95},{"affectedBasis","recent-link-arrival-or-queued-or-transmitting"}};
+    J recoveries=J::array();for(auto &e:recovery){J rows=J::array();
+      for(const auto &[key,flow]:e.flows)rows.push_back(recoveryFlowJson(e,key,flow));
+      double applied=0;int count=0;for(auto t:e.applied)if(std::isfinite(t)){count++;applied=std::max(applied,t);}
       recoveries.push_back({{"detectedSeconds",std::isfinite(e.detected)?J(e.detected-e.time):J(nullptr)},{"appliedNodes",count},{"expectedNodes",n},{"convergenceSeconds",count==n?J(applied-e.time):J(nullptr)},{"time",e.time},{"a",e.a},{"b",e.b},{"restore",e.up},{"flows",rows}});}result["recovery"]=recoveries;
     if(control&&control->hopAccepted<control->arrived+control->dropped)throw std::runtime_error("Control conservation failed");
     if(attempted!=received+dropped+noUplink+(sent-received-dropped))throw std::runtime_error("Offered packet conservation failed");

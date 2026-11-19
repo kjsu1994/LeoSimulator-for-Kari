@@ -245,15 +245,18 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
             except (ValueError, OSError) as exc:
                 return self.send_json({"error": str(exc)}, 400)
         if parsed.path == "/api/result":
-            pointer = Path(BASE_DIR, "data/latest.json")
-            if not pointer.exists():
-                return self.send_json(None)
-            run_id = urllib.parse.parse_qs(parsed.query).get("runId", [json.loads(pointer.read_text())["runId"]])[0]
+            query = urllib.parse.parse_qs(parsed.query)
+            run_id = query.get("runId", [None])[0]
+            if run_id is None:
+                pointer = Path(BASE_DIR, "data/latest.json")
+                if not pointer.exists():
+                    return self.send_json(None)
+                run_id = json.loads(pointer.read_text(encoding="utf-8"))["runId"]
             if not re.fullmatch(r"[A-Za-z0-9-]+", run_id):
                 return self.send_json({"error": "Invalid result pointer"}, 500)
             folder=Path(BASE_DIR,"data/runs",run_id)
             if not (folder/"manifest.json").is_file() and not (folder/"result.json").is_file():return self.send_json({"error":"보관된 실행 결과가 없습니다."},404)
-            if (urllib.parse.parse_qs(parsed.query).get("metadata")==["1"] or (folder/"result.json").stat().st_size>8*1024*1024) and (folder/"manifest.json").is_file():
+            if (query.get("metadata")==["1"] or (folder/"result.json").stat().st_size>8*1024*1024) and (folder/"manifest.json").is_file():
                 manifest=json.loads((folder/"manifest.json").read_text(encoding="utf-8"))
                 urls={name:"/data/runs/"+run_id+"/"+urllib.parse.quote(name,safe="/") for name in manifest["files"]}
                 return self.send_json({"ok":True,"runId":run_id,"bundle":{"manifest":manifest,"fileUrls":urls}})

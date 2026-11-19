@@ -73,6 +73,12 @@ class DataTests(unittest.TestCase):
                     with urllib.request.urlopen(f'http://127.0.0.1:{httpd.server_port}/api/result'+query) as response:result=json.load(response)
                     self.assertEqual(result['bundle']['manifest'],manifest)
                     self.assertEqual(result['bundle']['fileUrls']['routes.csv'],'/data/runs/large-result-run/routes.csv')
+                (base/'data/latest.json').unlink()
+                with urllib.request.urlopen(f'http://127.0.0.1:{httpd.server_port}/api/result') as response:
+                    self.assertIsNone(json.load(response))
+                with urllib.request.urlopen(f'http://127.0.0.1:{httpd.server_port}/api/result?runId=large-result-run&metadata=1') as response:
+                    self.assertEqual(json.load(response)['bundle']['manifest'],manifest)
+
             finally:httpd.shutdown();httpd.server_close();thread.join()
 
     def test_missing_include_is_an_error(self):
@@ -149,6 +155,20 @@ class DataTests(unittest.TestCase):
         cfg=configuration(server.read_ini_config("Dijkstra132Hop"))
         self.assertEqual(cfg["metric"],"hop")
         self.assertEqual(cfg["algorithm"],"dijkstra-hop")
+
+    def test_derived_routing_selector_overrides_ancestor_saved_algorithm(self):
+        from config_editor import edit
+        import shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            settings=Path(tmp)/'settings';shutil.copytree(Path(server.LEO_DIR),settings)
+            ini=settings/'simulations/Network/omnetpp.ini'
+            read=lambda name:server.read_ini_config(name,entry_path=str(ini))
+            edit(ini,'Dijkstra132',{'algorithm':'dijkstra-delay'},read)
+            self.assertEqual(read('Dijkstra132Hop')['algorithm'],'dijkstra-hop')
+            self.assertEqual(read('Mcsr132')['algorithm'],'mcsr-ls')
+            edit(ini,'Dijkstra132Hop',{'algorithm':'mcsr-ts'},read)
+            self.assertEqual(read('Dijkstra132Hop')['algorithm'],'mcsr-ts')
+            self.assertEqual(read('Dijkstra132')['algorithm'],'dijkstra-delay')
 
     def test_native_rejects_invalid_settings(self):
         from native_engine import configuration

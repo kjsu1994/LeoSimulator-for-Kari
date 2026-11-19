@@ -194,10 +194,23 @@ window.addEventListener("keydown",e=>{if(e.key==="Escape"&&nativeUI.drawing){nat
 const metricLabels={attempted:"발생",sent:"송신",received:"수신",dropped:"폐기",inFlight:"전송 중",deliveryRate:"전달률 (%)",meanDelayMs:"평균 지연 (ms)",throughputMbps:"처리량 (Mbps)",replanned:"재계산",reservedSwitches:"예비 경로 전환",peakMemoryBytes:"최대 메모리 (B)",elapsedSeconds:"계산 시간 (s)"};
 function metricText(v,d=2){return v===null||v===undefined||!Number.isFinite(Number(v))?"—":Number(v).toLocaleString("ko-KR",{maximumFractionDigits:d});}
 function measured(s,key){return ["meanDelayMs","delayStdMs","maxDelayMs","jitterMs","meanHops"].includes(key)&&!s.received?null:s[key];}
+function validationLabels(record){
+  if(!record?.scope?.length&&!record?.workloads?.length)return ["검증 범위 기록 없음"];
+  const scope=record.scope||[];
+  const labels=[];
+  if(scope.includes("fixed-graph-core")&&scope.includes("reference-core"))labels.push("코어 통과");
+  if(scope.includes("analytic-packet-kernel"))labels.push("커널 통과");
+  if(scope.includes("integration"))labels.push("통합 통과");
+  for(const test of [["scale-data-load","대규모 부하"],["long-packet-control","장시간 제어"]]){
+    const result=record.workloads?.find(w=>w.scope===test[0]);
+    labels.push(result?`${test[1]} 통과 (${result.satellites}위성 · ${result.simSeconds}초)`:`${test[1]} 기록 없음`);
+  }
+  return labels;
+}
 function showMetrics(result){
   nativeUI.result=result;const raw=result?.summary,s=raw?offered(raw):null;byId("nativeMetrics").hidden=!s;if(!s)return;
   let status=byId("validationStatus");if(!status){status=node("p",{id:"validationStatus",class:"quiet"});byId("nativeMetrics").prepend(status);}
-  status.textContent=[s.validation?.status==="passed"?"등록 시험 통과":"등록 검증 기록 없음",s.approximation?(s.approximation.limited?"라벨 제한 발생":"라벨 제한 미발생"):"라벨 제한 계측 없음",s.measurement?`측정 ${s.measurement.start}–${s.measurement.end}s · 관측 ${s.measurement.observedUntil}s`:null].filter(Boolean).join(" · ");
+  status.textContent=[...validationLabels(s.validation),s.approximation?(s.approximation.limited?"라벨 제한 발생":"라벨 제한 미발생"):"라벨 제한 계측 없음",s.measurement?`측정 ${s.measurement.start}–${s.measurement.end}s · 관측 ${s.measurement.observedUntil}s`:null].filter(Boolean).join(" · ");
   const grid=byId("metricValues");grid.replaceChildren();
   for(const key of ["attempted","received","dropped","inFlight","deliveryRate","meanDelayMs","throughputMbps","maxQueuePackets"]){const e=node("div");e.append(node("small",{},metricLabels[key]||"최대 대기 (패킷)"),node("strong",{},metricText(measured(s,key))));grid.append(e);}
   const body=byId("flowMetrics").tBodies[0];body.replaceChildren();byId("metricFlow").replaceChildren(new Option("전체 흐름","all"));
@@ -245,13 +258,24 @@ byId("loadExperiment").onclick=async()=>{try{const response=await fetch(`/api/ex
 function showExperimentStatistics(report){
   byId("singleComparisonControls").hidden=true;
   if(!byId("compareDialog").open)byId("compareDialog").showModal();
-  byId("comparisonStatus").textContent=`${report.stage==="final"?"최종 비교":report.stage==="pilot"?"예비 시험":"탐색 시험"} · 시드 ${report.seeds.length}개 · ${report.completedRuns}회 완료 · ${report.comparisonScope==="packet-system"?"패킷·제어 시험":report.comparisonScope==="routing-time-model"?"시간 모델 시험":"반복 시험"} · 95% 신뢰구간`;
+  byId("comparisonStatus").textContent=`${report.stage==="final"?"최종 비교":report.stage==="pilot"?"예비 시험":"탐색 시험"} · 시드 ${report.seeds.length}개 · ${report.completedRuns}회 완료 · ${report.comparisonScope==="packet-system"?"패킷·제어 시험":report.comparisonScope==="routing-time-model"?"시간 모델 시험":"반복 시험"}`;
   const content=byId("comparisonContent");content.replaceChildren();
-  const names={deliveryRate:"전달률 (%p)",throughputMbps:"측정 처리량 (Mbps)",meanDelayMs:"수신 지연 (ms)",jitterMs:"수신 지터 (ms)",unrecoveredRate:"미복구 비율 (%p)",controlWireBytes:"제어 전송량 (전체 B)",edgeChecks:"간선 검사 (전체)",labelExpand:"라벨 확장 (전체)"};
+  if(report.inputVariability){
+    const {trafficProfiles,physicalEventProfiles}=report.inputVariability;
+    content.append(node("p",{class:"quiet"},`송신 입력 ${trafficProfiles}종 · 물리 사건 ${physicalEventProfiles}종`));
+  }
+  const names={deliveryRate:"전달률 (%p)",throughputMbps:"측정 처리량 (Mbps)",meanDelayMs:"수신 지연 (ms)",jitterMs:"수신 지터 (ms)",unrecoveredRate:"첫 수신 미관측 (%p)",stableUnrecoveredRate:"안정 복구 미관측 (%p)",controlWireBytes:"제어 전송량 (전체 B)",edgeChecks:"간선 검사 (전체)",labelExpand:"라벨 확장 (전체)"};
   for(const comparison of report.comparisons){
     content.append(node("p",{},`${algorithmName({algorithm:comparison.algorithm})} − ${algorithmName({algorithm:comparison.baseline})}`));
-    const table=node("table"),head=table.createTHead().insertRow();for(const t of ["지표","평균 차이","95% 신뢰구간","유효 / 전체"])head.append(node("th",{},t));
-    const body=table.createTBody();for(const metric of comparison.metrics){const row=body.insertRow(),s=metric.statistics;for(const text of [names[metric.name]||metric.name,s?metricText(s.meanDifference):"관측 부족",s?.ci95?s.ci95.map(v=>metricText(v)).join(" ~ "):"—",`${metric.observedPairs} / ${report.seeds.length}`])row.insertCell().textContent=text;}
+    const labels={"fixed-input":"고정 입력 반복","distinct-inputs":"시드별 입력 변동 확인","repeated-inputs":"중복 입력 포함","unknown":"시드별 입력 변동 미확인"};
+    const variability=labels[comparison.inputClassification]||labels.unknown;
+    const showInterval=report.schema>=2&&comparison.intervalAvailable;
+    const observed=report.schema>=2?` · 서로 다른 입력 ${comparison.uniqueInputs}/${report.seeds.length} · 링크 난수 사용 시드 ${comparison.seedsUsingLinkRandomness}개`:"";
+    content.append(node("p",{class:"quiet"},variability+observed));
+    const table=node("table"),head=table.createTHead().insertRow();
+    const headings=["지표","평균 차이",...(showInterval?["95% 신뢰구간"]:[]),"유효 / 전체"];
+    for(const t of headings)head.append(node("th",{},t));
+    const body=table.createTBody();for(const metric of comparison.metrics){const row=body.insertRow(),s=metric.statistics;for(const text of [names[metric.name]||metric.name,s?metricText(s.meanDifference):"관측 부족",...(showInterval?[s?.ci95?s.ci95.map(v=>metricText(v)).join(" ~ "):"—"]:[]),`${metric.observedPairs} / ${report.seeds.length}`])row.insertCell().textContent=text;}
     content.append(table);
   }
 }
@@ -275,7 +299,21 @@ function showResearchMetrics(s){
   const grid=node("div",{class:"metric-grid"});for(const [name,v]of Object.entries({"제어 프레임":s.control?.hopAccepted,"제어 전송 (MB)":s.control?.wireBytes/1e6,"제어 폐기":s.control?.dropped,"간선 검사":s.operations?.edgeChecks,"라벨 확장":s.operations?.labelExpand,"재계산":s.replanned,"라벨 제거":s.operations?.capEvict,"라벨 거절":s.operations?.capReject})){const e=node("div");e.append(node("small",{},name),node("strong",{},metricText(v)));grid.append(e);}detail.append(grid);
   if(s.control?.byKind){const table=node("table"),head=table.createTHead().insertRow();for(const text of ["메시지","생성","홉 전달","홉 실패","전송 프레임","손실 프레임","전송 MB"])head.append(node("th",{},text));const body=table.createTBody();for(const [kind,m]of Object.entries(s.control.byKind)){const row=body.insertRow();for(const v of [kind,m.generated||0,m.messageHopArrivals||0,(m.messageHopDrops||0)+(m.routeDrops||0),m.frameAttempts||0,m.frameDrops||0,(m.wireBytes||0)/1e6])row.insertCell().textContent=typeof v==="number"?metricText(v):v;}detail.append(table);}
   for(const [name,time]of Object.entries(s.computeMs||{}))detail.append(node("p",{class:"quiet"},`${name}: ${metricText(time)} ms`));
-  for(const event of s.recovery||[]){detail.append(node("p",{},`${event.time}s · ${event.a}–${event.b} · ${event.restore?"재연결":"단절"}`));detail.append(node("p",{class:"quiet"},`감지 ${event.detectedSeconds==null?"미감지":metricText(event.detectedSeconds)+"s"} · 정보 수렴 ${event.convergenceSeconds==null?"미수렴":metricText(event.convergenceSeconds)+"s"} (${event.appliedNodes}/${event.expectedNodes})`));for(const f of event.flows)detail.append(node("p",{class:"quiet"},`${f.source}→${f.destination}: ${!f.affected?"영향 경로 없음":f.recoverySeconds==null?"관측 종료 · 미복구":metricText(f.recoverySeconds)+"s"}`));}
+  if(s.recoveryPolicy&&(s.recovery||[]).some(e=>e.flows.length)){
+    const p=s.recoveryPolicy;
+    detail.append(node("p",{class:"quiet"},`안정 복구 기준 · 연속 ${p.consecutiveWindows}개 ${p.windowSeconds}초 구간 · 구간당 ${p.minimumPacketsPerWindow}패킷 이상 · 전달률 ${p.minimumDeliveryRatePct}% 이상`));
+  }
+  const seconds=(value,missing)=>value==null?missing:metricText(value)+"s";
+  for(const event of s.recovery||[]){
+    detail.append(node("p",{},`${event.time}s · ${event.a}–${event.b} · ${event.restore?"재연결":"단절"}`));
+    detail.append(node("p",{class:"quiet"},`감지 ${seconds(event.detectedSeconds,"미감지")} · 정보 수렴 ${seconds(event.convergenceSeconds,"미수렴")} (${event.appliedNodes}/${event.expectedNodes})`));
+    for(const f of event.flows){
+      if(!f.affected)continue;
+      const first=seconds(f.firstPacketRecoverySeconds??f.recoverySeconds,"관측 종료까지 미수신");
+      const stable=Object.hasOwn(f,"stableRecoverySeconds")?` · 안정 복구 ${seconds(f.stableRecoverySeconds,"확인되지 않음")}`:"";
+      detail.append(node("p",{},`${f.source}→${f.destination} · 첫 수신 ${first}${stable}`));
+    }
+  }
   byId("nativeMetrics").append(detail);
 }
 byId("btnExperiment").onclick=async()=>{try{const response=await fetch(`/api/config?config=${encodeURIComponent(cfgNameSel.value)}`),cfg=await response.json();if(!response.ok)throw Error(cfg.error);const area=byId("experimentAlgorithms");area.replaceChildren();for(const [id,label]of Object.entries(cfg.capabilities.algorithms)){const e=node("label",{class:"check-field"});e.append(node("input",{type:"checkbox",class:"experiment-algorithm",value:id,checked:true}),document.createTextNode(algorithmName({algorithm:id})));area.append(e);}byId("experimentForm").dataset.limit=cfg.simTimeLimit;byId("experimentForm").dataset.processing=cfg.processingMode;byId("experimentRepetitions").value="1";byId("experimentSeed").value=cfg.seed;byId("experimentWarmup").value=cfg.warmupSeconds||0;byId("experimentDrain").value=cfg.drainSeconds||0;byId("experimentConditions").textContent=`${scenarioName(cfg.activeConfig)} · ${cfg.simTimeLimit}s · 시드 ${cfg.seed}`;byId("experimentError").textContent="";byId("experimentDialog").showModal();}catch(e){setStatus(e.message);}};

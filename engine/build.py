@@ -31,4 +31,4 @@ with tempfile.TemporaryDirectory(prefix="leo-build-") as tmp:
         subprocess.run(['wsl','-d','Ubuntu','-e','bash','-c',command],check=True,cwd='C:/')
         subprocess.run([str(Path(tmp)/(name+'.exe'))],check=True)
         shutil.copy2(Path(tmp)/(name+'.exe'),root/(name+'.exe'))
-(root/'build-info.json').write_text(json.dumps({'version':'4.1.0','compiler':'x86_64-w64-mingw32-g++ 13-win32','sources':source_hashes,'sha256':hashlib.sha256((root/'engine.exe').read_bytes()).hexdigest()},indent=2),encoding='utf-8')
+(root/'build-info.json').write_text(json.dumps({'version':'1.0.0','compiler':'x86_64-w64-mingw32-g++ 13-win32','sources':source_hashes,'sha256':hashlib.sha256((root/'engine.exe').read_bytes()).hexdigest()},indent=2),encoding='utf-8')

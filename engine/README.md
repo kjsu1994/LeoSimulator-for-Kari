@@ -64,7 +64,7 @@ Context.graph(viewer)는 실제 전달된 광고만 반영하며 궤도 기반 �
 데이터와 제어 직렬화 중 단절은 폐기하고 이미 전파 중인 프레임은 도착할 수 있습니다.
 algorithm operations는 원본 OpScope와 Dijkstra의 대응 카운터를 사용합니다.
 
-## 연구 검증 확장 (4.1.0)
+## 연구 검증 (1.0.0)
 
 원본 MCSR 헤더는 유지합니다. `tests/oracle_driver.cpp`는 입력 그래프에 대한 실제 코어 결과를 내보내며, `verify_oracle.py`는 제품의 계산 함수를 재사용하지 않고 경로를 열거해 비교합니다. `tests/test_kernel.cpp`는 시험 빌드에서만 노출한 패킷 커널을 사용해 직렬화·FIFO·큐 초과·장애 시각 순서·종료 관측과 비대칭 Dijkstra 비용을 확인합니다. 일반 실행 파일에 시험용 설정이나 공개 API를 추가하지 않습니다.
 

@@ -135,7 +135,21 @@ def configuration(cfg):
     c['routingType']=string('LeoDijkstra.satellite[0].net.routingType','Sat_Net_DijkstraRouting')
     c['metric']=string(routing+'metric','delay');service=string(routing+'service','LS').lower()
     default_algorithm=('mcsr-'+service) if c['routingType']=='Sat_Net_McsrRouting' else 'dijkstra-'+c['metric']
-    c['algorithm']=string(routing+'algorithm',default_algorithm)
+    algorithm_path=routing+'algorithm'
+    selector_paths=('LeoDijkstra.satellite[0].net.routingType',
+                    routing+('service' if c['routingType']=='Sat_Net_McsrRouting' else 'metric'))
+    # A legacy selector in a derived section overrides an ancestor's explicit algorithm.
+    selectors=[]
+    explicit=None
+    for entry in reversed(entries):
+        matcher=pattern(entry['k'])
+        if matcher.fullmatch(algorithm_path):
+            explicit=entry
+            break
+        if any(matcher.fullmatch(path) for path in selector_paths):selectors.append(entry['sec'])
+    c['algorithm']=default_algorithm
+    if explicit and all(section==explicit['sec'] for section in selectors):
+        c['algorithm']=explicit['v'].strip().strip('"')
     if c['algorithm'] not in ALGORITHMS or c['routingType'] not in ('Sat_Net_McsrRouting','Sat_Net_DijkstraRouting'):raise ValueError('Unsupported routing algorithm')
     if string('network','Florasat.Dijkstra132.LeoDijkstra')!='Florasat.Dijkstra132.LeoDijkstra' or not boolean(base+'enabled',True) or string(tc+'walkerType','DELTA')!='DELTA':raise ValueError('Unsupported network/constellation')
     if any(c[k]!=int(c[k]) or not 0<=c[k]<=99 for k in ('baseYear','epochYear')) or any(not 1<=c[k]<367 for k in ('baseDay','epochDay')):raise ValueError('Invalid epoch')
@@ -208,7 +222,7 @@ def configuration(cfg):
         c[key]=num('LeoDijkstra.native.'+key,0)
         if c[key]<0:raise ValueError('Invalid '+key)
     if c['warmupSeconds']+c['drainSeconds']>=c['simTimeLimit']:raise ValueError('Measurement window is empty')
-    c['modelVersion']='leo-research-4.1';c['metricVersion']=4;c['controlProtocolVersion']=2
+    c['modelVersion']='leo-research-1.0.0';c['metricVersion']=4;c['controlProtocolVersion']=2
     c['variables']=variables;c['capabilities']=capabilities();c['normalizedVersion']=4
     c['sweeps']={name:[number(x) for x in values.split(',')] for entry in entries for name,values in re.findall(r'\$\{(\w+)=([^}]+)\}',entry['v'])}
     return c

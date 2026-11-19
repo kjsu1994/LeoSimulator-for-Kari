@@ -155,8 +155,11 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     await retry(async()=>assert(await evaluate("window.batchBody?.algorithms.length===2 && byId('compareDialog').open")));
     await evaluate("byId('compareDialog').close();window.fetch=window.batchFetch");
     assert(await evaluate("batchBody.research.repetitions===10 && batchBody.research.seedStart===7 && batchBody.research.warmupSeconds===.1"));
-    await evaluate("showExperimentStatistics({stage:'pilot',seeds:[1,2],completedRuns:4,comparisons:[{baseline:'dijkstra-delay',algorithm:'mcsr-ls',metrics:[{name:'deliveryRate',statistics:{meanDifference:2,ci95:[1,3]},observedPairs:2},{name:'meanDelayMs',statistics:null,observedPairs:1}]}]})");
+    await evaluate("showExperimentStatistics({schema:2,stage:'pilot',seeds:[1,2],completedRuns:4,inputVariability:{trafficProfiles:2,physicalEventProfiles:1},comparisons:[{inputClassification:'distinct-inputs',intervalAvailable:true,uniqueInputs:2,seedsUsingLinkRandomness:0,baseline:'dijkstra-delay',algorithm:'mcsr-ls',metrics:[{name:'deliveryRate',statistics:{meanDifference:2,ci95:[1,3]},observedPairs:2},{name:'meanDelayMs',statistics:null,observedPairs:1}]}]})");
     assert(await evaluate("byId('singleComparisonControls').hidden && byId('comparisonStatus').textContent.includes('예비 시험') && byId('comparisonContent').textContent.includes('1 ~ 3') && byId('comparisonContent').textContent.includes('관측 부족')"));
+    await evaluate("showExperimentStatistics({schema:2,stage:'pilot',seeds:[1,2],completedRuns:4,comparisons:[{inputClassification:'fixed-input',intervalAvailable:false,uniqueInputs:1,seedsUsingLinkRandomness:0,baseline:'dijkstra-delay',algorithm:'mcsr-ls',metrics:[{name:'deliveryRate',observedPairs:2,statistics:{meanDifference:0,ci95:[0,0]}}]}]})");
+    assert(await evaluate("byId('comparisonContent').textContent.includes('고정 입력 반복') && !byId('comparisonContent').textContent.includes('신뢰구간')"));
+    assert(await evaluate("validationLabels({scope:['fixed-graph-core','reference-core','analytic-packet-kernel','integration'],workloads:[{scope:'long-packet-control',satellites:132,simSeconds:600}]}).join(' ').includes('대규모 부하 기록 없음 장시간 제어 통과 (132위성 · 600초)')"));
     for(const width of [1520,1100,700]){await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});assert(await evaluate("byId('compareDialog').scrollWidth<=byId('compareDialog').clientWidth"));}
     await evaluate("byId('compareDialog').close()");
 

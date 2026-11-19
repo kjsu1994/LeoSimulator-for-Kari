@@ -153,7 +153,32 @@ def prepare(base,cfg,cancel=None):
     cfg['physicalEventsHash']=hashlib.sha256(json.dumps(events,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     return cfg
 
-def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,variables=None,frozen=None):
+def publish_latest(base, result):
+    """Publish the finished run to HTTP and offline readers."""
+    data=Path(base)/'data'
+    pointer=data/'latest.json'
+    offline=data/'latest_result.js'
+    pointer_tmp=pointer.with_suffix('.tmp')
+    offline_tmp=offline.with_suffix('.tmp')
+    previous=pointer.read_bytes() if pointer.exists() else None
+    try:
+        pointer_tmp.write_text(json.dumps({'runId':result['runId']}),encoding='utf8')
+        offline_tmp.write_text('window.SIM_RESULT='+json.dumps(result,ensure_ascii=True,allow_nan=False)+';\n',encoding='utf8')
+        os.replace(pointer_tmp,pointer)
+        try:
+            os.replace(offline_tmp,offline)
+        except OSError:
+            if previous is None:
+                pointer.unlink()
+            else:
+                pointer_tmp.write_bytes(previous)
+                os.replace(pointer_tmp,pointer)
+            raise
+    finally:
+        pointer_tmp.unlink(missing_ok=True)
+        offline_tmp.unlink(missing_ok=True)
+
+def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,variables=None,frozen=None,*,publish=True):
     from result_bundle import make_native_bundle,write_bundle
     run_id=run_id or new_id();base=Path(base);cancel=cancel or threading.Event()
     if frozen is None:
@@ -182,21 +207,28 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
     if cancel.is_set():raise InterruptedError('실행을 중지했습니다.')
     if process.returncode:raise RuntimeError((folder/'run.log').read_text(encoding='utf-8',errors='replace')[-4000:])
     from research import evidence
-    summary=json.loads((folder/'summary.json').read_text());summary['validation']=evidence(base);summary['elapsedSeconds']=time.monotonic()-start;summary['peakMemoryBytes']=peak
+    summary=json.loads((folder/'summary.json').read_text())
+    if summary.get('modelVersion')!=cfg['modelVersion']:
+        raise ValueError('Engine model version differs from normalized input')
+    summary['validation']=evidence(base)
+    summary['elapsedSeconds']=time.monotonic()-start
+    summary['peakMemoryBytes']=peak
     (folder/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,allow_nan=False,indent=2),encoding='utf-8')
     profile=json.loads((base/'replay-model.json').read_text(encoding='utf-8'))
     bundle,payload=make_native_bundle(inputs,folder,config_name,profile['modelHash'],cfg,run_id,entry=Path(ini).relative_to(settings).as_posix())
     build=base/'engine/build-info.json'
     if build.exists():
         info=json.loads(build.read_text());
-        if info['sha256']!=cfg['commonKernelHash']:raise ValueError('Engine build metadata changed')
+        if info['sha256']!=cfg['commonKernelHash'] or info['version']!=summary.get('version'):raise ValueError('Engine build metadata changed')
         bundle['manifest']['build']=info
     bundle['manifest']['engine']['sha256']=cfg['commonKernelHash']
     write_bundle(folder,bundle,payload)
     result={'ok':True,'runId':run_id,'bundle':bundle}
     (folder/'result.json').write_text(json.dumps(result,ensure_ascii=False,allow_nan=False),encoding='utf-8')
-    target=base/'data/latest_result.js';tmp=target.with_suffix('.tmp');tmp.write_text('window.SIM_RESULT='+json.dumps(result,ensure_ascii=True,allow_nan=False)+';\n',encoding='utf-8');os.replace(tmp,target)
-    pointer=base/'data/latest.json';tmp=pointer.with_suffix('.tmp');tmp.write_text(json.dumps({'runId':run_id}),encoding='utf-8');os.replace(tmp,pointer)
+    if publish:
+        with LOCK:
+            if cancel.is_set():raise InterruptedError('실행을 중지했습니다.')
+            publish_latest(base,result)
     return result
 
 def start(base,settings,ini,name,read_config,variables=None,algorithms=None,research=None):
@@ -244,7 +276,7 @@ def start(base,settings,ini,name,read_config,variables=None,algorithms=None,rese
                     if event.is_set():raise InterruptedError('실행을 중지했습니다.')
                     child=copy.deepcopy(common);child['algorithm']=algorithm;child['routingType']='Sat_Net_McsrRouting' if algorithm.startswith('mcsr-') else 'Sat_Net_DijkstraRouting';child['metric']='hop' if algorithm=='dijkstra-hop' else 'delay'
                     child_id=new_id() if algorithms is not None else run_id;job['currentRunId']=child_id;job['currentSeed']=seed
-                    result=execute(base,settings,ini,name,read_config,child_id,event,variables,(child,inputs))
+                    result=execute(base,settings,ini,name,read_config,child_id,event,variables,(child,inputs),publish=False)
                     job['completedRuns'].append({'runId':child_id,'algorithm':algorithm,'seed':seed})
                     summary=json.loads((Path(base)/'data/runs'/child_id/'summary.json').read_text(encoding='utf8'))
                     records.append({'seed':seed,'algorithm':algorithm,'config':child,'summary':summary});save_manifest()
@@ -257,6 +289,7 @@ def start(base,settings,ini,name,read_config,variables=None,algorithms=None,rese
             with LOCK:
                 if event.is_set():raise InterruptedError('실행을 중지했습니다.')
                 manifest['status']='completed';save_manifest()
+                publish_latest(base,result)
                 job['result']=manifest if algorithms is not None else result;job['status']='completed'
         except InterruptedError as e:
             job.update(status='cancelled',error=str(e));manifest.update(status='cancelled',error=str(e))
