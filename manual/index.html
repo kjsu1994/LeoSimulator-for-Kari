@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="LEO Network Simulator의 설치, 시험 조건, 실행 및 결과 비교 안내">
+<title>LEO Network Simulator 사용자 설명서</title>
+<style>
+:root { color-scheme: light; --ink:#1a2b40; --muted:#50647a; --line:#d5e0ea; --blue:#135b91; --pale:#e9f2fa; --sans: "맑은 고딕","Malgun Gothic",system-ui,sans-serif; }
+* { box-sizing:border-box; }
+html { scroll-padding-top:86px; }
+body { margin:0; font:15px/1.75 var(--sans); color:var(--ink); background:#edf2f7; overflow-wrap:anywhere; }
+a { color:var(--blue); text-underline-offset:3px; }
+button,input { font:inherit; }
+button { cursor:pointer; }
+:focus-visible { outline:3px solid #3593d0; outline-offset:3px; }
+.skip { position:absolute; top:8px; left:12px; transform:translateY(-150%); background:white; padding:5px 9px; z-index:4; }
+.skip:focus { transform:none; }
+.toolbar { position:sticky; top:0; z-index:2; background:#102a45; color:#f7fbff; border-bottom:1px solid #314d68; }
+.tools { max-width:1280px; min-height:64px; margin:auto; display:flex; align-items:center; gap:12px; padding:9px 22px; }
+.brand { color:inherit; text-decoration:none; font-weight:700; white-space:nowrap; }
+.search { margin-left:auto; display:flex; gap:5px; align-items:center; }
+.search input { width:clamp(140px,24vw,330px); min-width:0; padding:5px 9px; border:1px solid #7991a6; border-radius:5px; }
+.tools button { color:inherit; background:#203e5c; border:1px solid #66819c; border-radius:5px; padding:4px 9px; white-space:nowrap; }
+.tools button:hover { background:#365b7e; }.tools button:disabled{opacity:.55;cursor:default;}
+.version { font-size:13px; color:#c7d8e8; white-space:nowrap; }
+.layout { max-width:1280px; margin:auto; padding:26px 22px 60px; display:grid; grid-template-columns:245px minmax(0,1fr); gap:25px; align-items:start; }
+.sidebar { position:sticky; top:86px; max-height:calc(100vh - 108px); overflow:auto; background:#fff; border:1px solid var(--line); border-radius:9px; padding:12px; }
+.sidebar summary { cursor:pointer; font-weight:700; padding:4px 8px; }.sidebar nav{padding:5px 0;}
+.sidebar a { display:block; padding:5px 8px; text-decoration:none; border-radius:5px; font-size:14px; }
+.sidebar a:hover,.sidebar [aria-current] { background:var(--pale); color:#103c64; }
+.results h2 { margin:4px 8px; font-size:15px; }.results p{margin:4px 8px;}.results a{border-top:1px solid var(--line);}.results small{display:block;color:var(--muted);}
+.sheet { background:#fff; border:1px solid var(--line); border-radius:11px; margin-bottom:20px; padding:32px 37px; }
+.cover { background:#fff; border-top:6px solid #1a6ca3; padding:42px 37px 36px; }
+.sheet-brand { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
+.sheet-brand img { width:154px; height:auto; max-width:42%; }
+.cover .sheet-brand img { width:198px; }
+.kicker { color:#175784; font-size:13px; font-weight:700; letter-spacing:.04em; margin:0 0 5px; }
+h1,h2,h3 { color:#132b44; line-height:1.35; } h1{font-size:37px;margin:0 0 16px;} h2{font-size:27px;margin:0 0 12px;} h3{font-size:17px;margin:20px 0 6px;}
+.lead { font-size:16px; color:#415970; margin:0 0 19px; } p{margin:10px 0;} li{margin:4px 0;} ul,ol{padding-left:24px;}
+.toc { margin:24px 0 0; padding-top:18px; border-top:1px solid var(--line); } .toc ol { display:grid;grid-template-columns:1fr 1fr; gap:2px 25px; }
+table { width:100%; margin:15px 0; border-collapse:collapse; font-size:14px; }
+th,td { border:1px solid #d4e0ea; padding:8px 10px; text-align:left; vertical-align:top; }
+thead th { background:#e5f0f8; color:#143b5d; } tbody th { font-weight:650; min-width:98px; width:26%; background:#f5f8fb; }
+figure { margin:14px 0; text-align:center; } figure a{display:inline-block;max-width:100%;} figure img{display:block;max-width:100%;max-height:490px;margin:auto;border:1px solid #b3c7db;border-radius:7px;} figcaption{color:var(--muted);font-size:13px;margin-top:3px;}
+.tip { background:#eaf3fa; border-left:3px solid #2a80b8; padding:9px 12px; margin:15px 0; }
+.paging { display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; border-top:1px solid var(--line); margin-top:20px; padding-top:12px; font-size:14px; }
+.note { color:var(--muted); font-size:13px; }
+mark { background:#ffe58f; color:#211800; }
+@media(max-width:900px){.layout{grid-template-columns:188px minmax(0,1fr);gap:14px}.sheet{padding:25px}.tools{padding-inline:15px}}
+@media(max-width:680px){html{scroll-padding-top:128px}.tools{flex-wrap:wrap;gap:7px}.tools .search{margin:0;flex:1 0 100%;order:4}.search input{flex:1}.layout{display:block;padding:12px}.sidebar{position:static;max-height:none;margin-bottom:12px}.sheet{padding:18px}.toc ol{grid-template-columns:1fr}h1{font-size:28px}h2{font-size:22px}th,td{padding:6px}}
+@page { size:A4; margin:15mm 16mm; }
+@media print {
+  html,body{background:#fff;font-size:10.25pt;line-height:1.53;}
+  .toolbar,.sidebar,.paging,.skip,.save-note{display:none!important;}
+  .layout{display:block;padding:0;max-width:none;}
+  .sheet{margin:0;padding:0;border:0;border-radius:0;break-before:page;}
+  .cover{break-before:auto;border-top:3pt solid #1a6ca3;padding-top:18mm;}
+  .toc ol{display:grid;grid-template-columns:1fr 1fr;}
+  h1{font-size:27pt;} h2{font-size:20pt;} h3{font-size:13pt;}
+  .sheet-brand img{width:35mm;} .cover .sheet-brand img{width:47mm;}
+  .lead{font-size:11.5pt;margin-bottom:10pt;} .kicker{font-size:9pt;}
+  figure,table,.tip{break-inside:avoid;} figure img{max-height:96mm;} figcaption{font-size:9pt;}
+  table{font-size:9.8pt;margin:8pt 0;} th,td{padding:4pt 6pt;}
+  .tip{margin:8pt 0;} th,.tip{print-color-adjust:exact;} mark{background:transparent;color:inherit;}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#manual">본문으로 이동</a>
+<header class="toolbar"><div class="tools">
+  <a href="#cover" class="brand">사용자 설명서</a><span class="version">v1.0.0</span>
+  <div class="search" role="search">
+    <input id="search" type="search" aria-label="설명서 검색" placeholder="기능·버튼·오류 검색" autocomplete="off">
+    <output id="matches" aria-live="polite"></output>
+    <button type="button" id="previous" aria-label="이전 검색 결과" disabled>‹</button>
+    <button type="button" id="next" aria-label="다음 검색 결과" disabled>›</button>
+  </div>
+  <button type="button" id="pdf" title="인쇄 창에서 PDF로 저장을 선택하세요">PDF 저장</button>
+</div></header>
+<div class="layout">
+  <aside class="sidebar">
+    <details id="contents" open><summary>목차</summary><nav aria-label="설명서 목차"><a href="#cover">표지·목차</a><a href="#overview">프로그램과 화면 구성</a><a href="#install">설치와 첫 실행</a><a href="#scenarios">시험 조건과 알고리즘 선택</a><a href="#algorithms">알고리즘과 비교 목적</a><a href="#settings">조건 수정과 기본값</a><a href="#ini">INI와 외부 일정 편집</a><a href="#playback">지도 재생과 결과 가져오기</a><a href="#metrics">수신 결과와 복구 지표 읽기</a><a href="#compare">비교 실행과 반복 실험</a><a href="#results">결과 보관과 문제 해결</a></nav></details>
+    <nav id="results" class="results" aria-label="검색 결과" hidden></nav>
+  </aside>
+  <main id="manual" tabindex="-1">
+    <section id="cover" class="sheet cover" aria-labelledby="manual-title">
+      <div class="sheet-brand"><p class="kicker">WINDOWS · 버전 1.0.0</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div>
+      <h1 id="manual-title">LEO Network Simulator<br>사용자 설명서</h1>
+      <p class="lead">저궤도 위성망에서 패킷 전달, 장애 복구 및 라우팅 알고리즘을 시험하는 방법을 안내합니다.</p>
+      <p>바로 시작하려면 <a href="#install">설치와 첫 실행</a>을 참고하세요. 프로그램 상단의 작은 문서 아이콘으로 이 설명서를 다시 열 수 있습니다.</p>
+      <p class="note save-note">파일로 보관하려면 상단의 <strong>PDF 저장</strong>을 누른 뒤 인쇄 창의 대상에서 <strong>PDF로 저장</strong>을 선택하세요.</p>
+      <nav class="toc" aria-label="전체 목차"><h2>목차</h2><ol><li><a href="#overview">프로그램과 화면 구성</a></li><li><a href="#install">설치와 첫 실행</a></li><li><a href="#scenarios">시험 조건과 알고리즘 선택</a></li><li><a href="#algorithms">알고리즘과 비교 목적</a></li><li><a href="#settings">조건 수정과 기본값</a></li><li><a href="#ini">INI와 외부 일정 편집</a></li><li><a href="#playback">지도 재생과 결과 가져오기</a></li><li><a href="#metrics">수신 결과와 복구 지표 읽기</a></li><li><a href="#compare">비교 실행과 반복 실험</a></li><li><a href="#results">결과 보관과 문제 해결</a></li></ol></nav>
+    </section>
+    <section class="sheet" id="overview" aria-labelledby="overview-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서 · 01</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="overview-title">프로그램과 화면 구성</h2><p class="lead">시험 조건을 정하고 실행한 뒤, 지도와 수신 결과에서 같은 실행을 살펴봅니다.</p>
+<figure><a href="assets/overview.png" target="_blank" rel="noopener" aria-label="그림 1. 지도 재생, 새 시뮬레이션 및 수신 결과가 표시된 기본 화면 · 원본 보기"><img src="assets/overview.png" alt="그림 1. 지도 재생, 새 시뮬레이션 및 수신 결과가 표시된 기본 화면"></a><figcaption>그림 1. 지도 재생, 새 시뮬레이션 및 수신 결과가 표시된 기본 화면</figcaption></figure>
+<table><thead><tr><th scope="col">화면</th><th scope="col">하는 일</th></tr></thead><tbody><tr><th scope="row">상단 재생 도구</th><td>현재 결과의 재생·일시 정지, 시각 이동, 재생 속도 조절과 결과 불러오기</td></tr><tr><th scope="row">왼쪽 지도</th><td>위성 위치, 위성 간 연결(ISL), 지상 연결(GSL) 및 계획 경로 확인</td></tr><tr><th scope="row">오른쪽 새 시뮬레이션</th><td>시험 조건과 알고리즘을 선택하고 새 실행 또는 비교 실행 시작</td></tr><tr><th scope="row">오른쪽 수신 결과</th><td>전달률·수신 지연·처리량, 시간별 그래프와 실행 비교 확인</td></tr></tbody></table>
+<aside class="tip">ⓘ 아이콘에 마우스를 올리거나 클릭하면 해당 화면과 설정값의 설명을 볼 수 있습니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#cover">← 표지·목차</a><a href="#install">설치와 첫 실행 →</a></nav>
+</section><section class="sheet" id="install" aria-labelledby="install-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서 · 02</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="install-title">설치와 첫 실행</h2><p class="lead">Windows x64 환경에서 배포 ZIP을 모두 풀고 sim-ui.exe를 실행합니다.</p>
+<h3>실행 전 준비</h3>
+<p>Windows 10 또는 11, Microsoft Edge WebView2 Runtime, Windows UI 호스트에 필요한 .NET Framework를 사용합니다. 압축을 푸는 폴더에는 쓰기 권한이 필요합니다.</p>
+<ol><li>ZIP 전체를 쓰기 가능한 폴더에 풉니다. sim-ui.exe는 settings, engine, data와 같은 배포 폴더에서 실행합니다.</li><li>오른쪽 새 시뮬레이션에서 시험 조건을 기본 통신으로, 알고리즘을 Dijkstra · 지연 최소로 선택합니다.</li><li>실행을 누르고 계산 완료를 확인합니다. 지도와 수신 결과가 새 실행으로 전환됩니다.</li><li>시간 슬라이더를 움직이거나 재생을 눌러 지도를 확인합니다. 다시 열 수 있도록 data/runs 안의 실행 ID 폴더를 보관합니다.</li></ol>
+<table><thead><tr><th scope="col">여는 파일</th><th scope="col">사용 범위</th></tr></thead><tbody><tr><th scope="row">sim-ui.exe</th><td>조건 수정, 새 실행, 비교 실행, 결과 열기 및 지도 재생</td></tr><tr><th scope="row">index.html</th><td>직접 열면 저장된 결과를 재생합니다. 계산 및 INI 수정은 EXE에서 진행합니다.</td></tr></tbody></table>
+<aside class="tip">EXE에는 Python 실행 환경이 포함됩니다. OMNeT++, INET, WSL, Docker 또는 원본 프로젝트를 준비할 필요가 없습니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#overview">← 프로그램과 화면 구성</a><a href="#scenarios">시험 조건과 알고리즘 선택 →</a></nav>
+</section><section class="sheet" id="scenarios" aria-labelledby="scenarios-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서 · 03</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="scenarios-title">시험 조건과 알고리즘 선택</h2><p class="lead">시험 조건은 위성망·송신·장애 등 입력을 정하고, 알고리즘은 그 안에서 경로를 고르는 방법을 정합니다.</p>
+<figure><a href="assets/scenario.png" target="_blank" rel="noopener" aria-label="그림 2. 추가 시험 표시를 켜고 반복 링크 장애를 선택한 화면 · 원본 보기"><img src="assets/scenario.png" alt="그림 2. 추가 시험 표시를 켜고 반복 링크 장애를 선택한 화면"></a><figcaption>그림 2. 추가 시험 표시를 켜고 반복 링크 장애를 선택한 화면</figcaption></figure>
+<p>추가 시험 표시는 기본 목록에 더해 INI에 등록된 전체 시험 구성을 보여줍니다. 조건을 선택하면 목록 아래 설명과 설정 요약이 갱신됩니다. 실행을 누르면 선택한 조건으로 새 결과가 생성됩니다.</p>
+<table><thead><tr><th scope="col">조건</th><th scope="col">기본 설정에서 확인하는 내용</th></tr></thead><tbody><tr><th scope="row">기본 통신</th><td>기본 위성군과 여러 송신 노드에서 전달률·지연·계획 경로 확인</td></tr><tr><th scope="row">반복 링크 장애</th><td>60·120·180초마다 고정 출발·목적 흐름의 기준 경로에서 위성 간 링크 하나를 각각 30초 동안 끊어 우회와 수신 재개 확인</td></tr><tr><th scope="row">무작위 링크 장애</th><td>30~570초 사이에 무작위 링크 장애 20건을 각각 30초씩 적용해 전달률·지연 확인. 같은 입력과 장애 시드는 동일 장애 일정을 재현</td></tr></tbody></table><nav class="paging" aria-label="항목 이동"><a href="#install">← 설치와 첫 실행</a><a href="#algorithms">알고리즘과 비교 목적 →</a></nav>
+</section><section class="sheet" id="algorithms" aria-labelledby="algorithms-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서 · 04</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="algorithms-title">알고리즘과 비교 목적</h2><p class="lead">알고리즘을 고르면 선택한 INI 구성에 저장됩니다. 저장된 지도와 수신 결과는 새 실행이 끝날 때까지 그 실행의 데이터를 표시합니다.</p>
+<table><thead><tr><th scope="col">화면 표시</th><th scope="col">경로 선택 기준</th></tr></thead><tbody><tr><th scope="row">Dijkstra · 지연 최소</th><td>전파 지연을 최소화하는 경로</td></tr><tr><th scope="row">Dijkstra · 홉 최소</th><td>홉 수를 최소화하는 경로</td></tr><tr><th scope="row">MCSR-LS</th><td>지연 우선</td></tr><tr><th scope="row">MCSR-TS</th><td>처리량 우선. 지연 상한을 지정할 수 있음</td></tr><tr><th scope="row">MCSR-HR</th><td>신뢰성 우선. 지터 제약을 지정할 수 있음</td></tr></tbody></table>
+<h3>시험 목적별 선택</h3>
+<ul><li>구성을 처음 확인할 때는 기본 통신을 한 번 실행해 지도·송수신 상태를 확인합니다.</li><li>경로 복구를 비교할 때는 반복 링크 장애 또는 무작위 링크 장애를 선택하고 비교 실행을 사용합니다.</li><li>부하에 따른 차이를 살펴볼 때는 패킷 크기를 유지한 채 송신률이나 송신 노드 수를 단계적으로 바꿉니다. 같은 단계에서는 입력을 고정한 채 알고리즘을 비교합니다.</li></ul>
+<aside class="tip">링크 장애 비교는 같은 물리 사건과 공통 SRD에 대해 진행합니다. 반복 링크 장애의 대상은 해당 시각의 기준 경로에서 정해집니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#scenarios">← 시험 조건과 알고리즘 선택</a><a href="#settings">조건 수정과 기본값 →</a></nav>
+</section><section class="sheet" id="settings" aria-labelledby="settings-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서 · 05</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="settings-title">조건 수정과 기본값</h2><p class="lead">조건 수정에서 변경한 값은 INI에 저장을 누르면 다음 실행에 적용됩니다.</p>
+<figure><a href="assets/conditions.png" target="_blank" rel="noopener" aria-label="그림 3. 조건 수정과 기본값 미리 보기 · 원본 보기"><img src="assets/conditions.png" alt="그림 3. 조건 수정과 기본값 미리 보기"></a><figcaption>그림 3. 조건 수정과 기본값 미리 보기</figcaption></figure>
+<ol><li>시험 조건을 선택한 뒤 조건 수정을 누릅니다.</li><li>기본 설정, 트래픽, 링크 및 장애·환경 조건을 확인합니다. 항목 옆 ⓘ에서 단위와 변경 효과를 읽을 수 있습니다.</li><li>제공 설정을 다시 불러오려면 기본값을 누릅니다. 적용하려면 INI에 저장, 이번 편집을 버리려면 취소를 누릅니다.</li></ol>
+<p>기본값은 선택한 구성의 제공 섹션을 기준으로 하며 상속값은 현재 상위 설정을 따릅니다. 직접 추가한 구성은 제공 기본값이 없으므로 값을 직접 편집합니다.</p>
+<table><thead><tr><th scope="col">조정할 값</th><th scope="col">관찰할 항목</th></tr></thead><tbody><tr><th scope="row">위성 수·궤도면·고도</th><td>위성 수는 궤도면 수로 나누어 떨어져야 합니다. 접속 기회와 경로 길이의 변화를 관찰합니다.</td></tr><tr><th scope="row">송신률·송신 간격·패킷 크기</th><td>발생 패킷 수, 큐 대기와 폐기, 처리량 변화를 관찰합니다.</td></tr><tr><th scope="row">최소 고도각·링크 용량·큐</th><td>접속 범위, 병목 및 링크 포화의 변화를 관찰합니다.</td></tr></tbody></table><nav class="paging" aria-label="항목 이동"><a href="#algorithms">← 알고리즘과 비교 목적</a><a href="#ini">INI와 외부 일정 편집 →</a></nav>
+</section><section class="sheet" id="ini" aria-labelledby="ini-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서 · 06</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="ini-title">INI와 외부 일정 편집</h2><p class="lead">INI 상세에서 적용된 설정 키와 값, 섹션 및 상속 정보를 확인합니다.</p>
+<ol><li>새 시뮬레이션에서 INI 상세를 펼치고 INI 파일을 누릅니다.</li><li>현재 실행 설정의 진입 파일은 settings/simulations/Network/omnetpp.ini입니다. 파일을 UTF-8로 저장하고 설정 새로고침을 누릅니다.</li><li>새 구성은 [Config 이름]과 extends로 만들 수 있습니다. 추가 시험 표시를 켜고 새 구성을 선택합니다.</li></ol>
+<table><thead><tr><th scope="col">내용</th><th scope="col">형식 또는 위치</th></tr></thead><tbody><tr><th scope="row">링크 직접 장애</th><td>12-13@60+30 → 위성 12와 13 사이 링크를 60초에 30초간 끊음</td></tr><tr><th scope="row">기준 경로 장애</th><td>route@60+30 → 기준 경로의 위성 간 링크를 60초에 30초간 끊음</td></tr><tr><th scope="row">계획된 ISL 개폐</th><td>time,event,satA,satB 열이 있는 CSV. event에는 failure 또는 restore를 사용하며 시간 단위는 초</td></tr><tr><th scope="row">지역 혼잡</th><td>환경 조건에서 링크, 위성, 궤도면, 지도 구역 등을 지정해 용량·버퍼·지연·지터·손실을 설정</td></tr></tbody></table>
+<p>상대 경로는 진입 INI의 위치를 기준으로 해석합니다. 개폐 일정은 고정 격자에 있는 링크를 사용합니다. 기존 구성 형식과 지원 키는 README.md의 시나리오 설정 항목에서 확인할 수 있습니다.</p><nav class="paging" aria-label="항목 이동"><a href="#settings">← 조건 수정과 기본값</a><a href="#playback">지도 재생과 결과 가져오기 →</a></nav>
+</section><section class="sheet" id="playback" aria-labelledby="playback-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서 · 07</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="playback-title">지도 재생과 결과 가져오기</h2><p class="lead">현재 재생 중인 지도와 새 시뮬레이션 설정은 화면의 상태 표시에서 구분합니다.</p>
+<table><thead><tr><th scope="col">열기 방식</th><th scope="col">표시되는 내용</th></tr></thead><tbody><tr><th scope="row">실행 결과 열기</th><td>manifest.json이 있는 개별 실행 ID 폴더를 선택합니다. 보관된 설정과 사건을 사용해 위성 위치·링크·경로를 재생하며, 저장된 수신 통계를 표시합니다.</td></tr><tr><th scope="row">CSV만 열기</th><td>routes.csv의 시각, 출발·목적, 위성 경로와 계산 지연을 읽습니다. 현재 지도와 일치하는 CSV는 함께 재생할 수 있습니다. 다른 실행의 CSV를 열면 기존 지도를 시각이 고정된 참고 화면으로 표시합니다.</td></tr></tbody></table>
+<ol><li>실행 결과 열기에서는 data/runs 상위 폴더 대신 data/runs/&lt;실행 ID&gt; 폴더 전체를 선택합니다.</li><li>슬라이더 또는 −1s / +1s로 관찰 시각을 이동하고, 재생 속도를 바꿔 움직임을 확인합니다.</li><li>지도에서 위성·지상 노드에 마우스를 올려 정보를 읽습니다. ISLs, GSLs, Coverage, Active Routes, Labels 체크박스로 표시 항목을 조절합니다.</li><li>출발·목적 필터로 관심 경로를 찾고 Recent Planned Routes 표에서 계획 경로를 확인합니다.</li></ol>
+<aside class="tip">CSV의 경로 번호와 위성 ID만으로는 위성의 좌표, 지상 노드의 이동, 전체 ISL·GSL, 수신 패킷 통계를 재구성할 수 없습니다. 전체 재생에는 실행 결과 폴더가 필요합니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#ini">← INI와 외부 일정 편집</a><a href="#metrics">수신 결과와 복구 지표 읽기 →</a></nav>
+</section><section class="sheet" id="metrics" aria-labelledby="metrics-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서 · 08</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="metrics-title">수신 결과와 복구 지표 읽기</h2><p class="lead">지도와 경로 표는 계획 경로를, 수신 결과는 패킷이 실제로 처리된 시뮬레이션 결과를 보여줍니다.</p>
+<figure><a href="assets/metrics.png" target="_blank" rel="noopener" aria-label="그림 4. 수신 결과, 시간별 그래프와 흐름별 통계 · 원본 보기"><img src="assets/metrics.png" alt="그림 4. 수신 결과, 시간별 그래프와 흐름별 통계"></a><figcaption>그림 4. 수신 결과, 시간별 그래프와 흐름별 통계</figcaption></figure>
+<table><thead><tr><th scope="col">항목</th><th scope="col">읽는 기준</th></tr></thead><tbody><tr><th scope="row">전달률</th><td>수신 ÷ 발생 × 100. 발생에는 위성 접속·초기 경로를 찾지 못한 시도도 포함</td></tr><tr><th scope="row">수신 지연·지터</th><td>수신한 패킷의 종단 간 지연과 그 변동. 수신이 없을 때 빈 값은 미관측</td></tr><tr><th scope="row">처리량</th><td>수신한 데이터 페이로드를 집계 시간으로 나눈 값. 그래프에서 시간별 변동 확인</td></tr><tr><th scope="row">첫 수신 / 안정 복구</th><td>장애 이후 생성된 첫 패킷의 수신 시각과, 이후 두 관측 구간에서 정해진 전달 기준을 만족한 시각을 각각 확인</td></tr><tr><th scope="row">제어 전송·정보 수렴</th><td>상태 전달에 사용한 전송량과 장애 정보가 대상 노드들에 반영되기까지의 시간</td></tr></tbody></table>
+<aside class="tip">경로 표의 Predicted propagation은 계획 시점의 계산값입니다. 수신 지연에는 전송과 큐 처리 등이 반영되므로 수신 결과에서 확인합니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#playback">← 지도 재생과 결과 가져오기</a><a href="#compare">비교 실행과 반복 실험 →</a></nav>
+</section><section class="sheet" id="compare" aria-labelledby="compare-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서 · 09</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="compare-title">비교 실행과 반복 실험</h2><p class="lead">비교 실행은 새 결과를 계산합니다. 수신 결과의 실행 비교에서는 완료된 결과를 다시 비교합니다.</p>
+<figure><a href="assets/experiment.png" target="_blank" rel="noopener" aria-label="그림 5. 비교 실행에서 알고리즘과 반복 조건 선택 · 원본 보기"><img src="assets/experiment.png" alt="그림 5. 비교 실행에서 알고리즘과 반복 조건 선택"></a><figcaption>그림 5. 비교 실행에서 알고리즘과 반복 조건 선택</figcaption></figure>
+<ol><li>시험 조건을 선택하고 비교 실행을 누릅니다. 비교할 알고리즘을 체크합니다.</li><li>반복 횟수 1회·10회·30회를 고릅니다. 전체 실행 횟수는 선택한 알고리즘 수 × 반복 횟수입니다.</li><li>필요하면 고급 설정에서 시작 시드, 준비 구간과 종료 관측 구간을 설정하고 실행합니다.</li><li>이전에 계산한 결과는 수신 결과 → 실행 비교에서 파일 또는 보관 이력으로 엽니다. 완료된 반복 결과는 반복 실험 → 통계 보기에서 확인합니다.</li></ol>
+<p>같은 시드의 알고리즘은 공통 송신 입력·장애 사건·SRD를 사용합니다. 준비 구간에서 생성된 패킷은 측정에서 제외되고, 종료 관측 구간에는 새 데이터 패킷 생성을 멈춥니다.</p>
+<aside class="tip">시드가 달라도 실제 입력이 고정되면 결정적 재현 시험에 해당합니다. 조건 다양성은 송신 부하, 장애 강도 또는 위성 구성을 바꾼 별도 시험에서 확인합니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#metrics">← 수신 결과와 복구 지표 읽기</a><a href="#results">결과 보관과 문제 해결 →</a></nav>
+</section><section class="sheet" id="results" aria-labelledby="results-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서 · 10</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="results-title">결과 보관과 문제 해결</h2><p class="lead">결과는 실행 ID 폴더 단위로 복사하면 다른 PC에서도 열 수 있습니다.</p>
+<table><thead><tr><th scope="col">파일 또는 폴더</th><th scope="col">보관 이유</th></tr></thead><tbody><tr><th scope="row">manifest.json</th><td>실행 식별자와 파일 해시. 나머지 파일과 함께 유지</td></tr><tr><th scope="row">config/ · inputs/ · normalized.json</th><td>당시 INI, 외부 입력, 실제 적용한 정규화 설정</td></tr><tr><th scope="row">routes.csv · summary.json</th><td>계획 경로와 패킷 수신·제어·계산 통계</td></tr><tr><th scope="row">timeseries.csv · network-events.jsonl</th><td>시간별 통계 및 장애·혼잡·제어 관련 기록</td></tr><tr><th scope="row">data/experiments/&lt;실험 ID&gt;</th><td>반복 실행 목록·공통 입력·통계. 관련 data/runs 폴더도 함께 보관</td></tr></tbody></table>
+<h3>자주 발생하는 상황</h3>
+<table><thead><tr><th scope="col">증상</th><th scope="col">확인 방법</th></tr></thead><tbody><tr><th scope="row">EXE 창이 뜨지 않거나 지도가 검게 보임</th><td>배포 ZIP을 전체 해제했는지, data/earth.png가 있는지, WebView2가 설치되었는지 확인합니다. 실행 중인 다른 sim-ui 인스턴스가 있으면 닫고 다시 엽니다.</td></tr><tr><th scope="row">폴더를 열 때 오류가 남</th><td>개별 실행 ID 폴더를 선택했는지 확인합니다. 누락되거나 수정된 파일은 원래 결과에서 다시 복사합니다.</td></tr><tr><th scope="row">설정이나 실행 버튼이 비활성</th><td>index.html을 직접 열었다면 sim-ui.exe로 전환합니다. 실행 중이라면 완료되거나 중지될 때까지 기다립니다.</td></tr><tr><th scope="row">비교가 다른 조건으로 표시됨</th><td>모델·엔진, 공통 시나리오, 장애 사건 및 측정 구간이 같은지 확인합니다. 필요하면 비교 실행으로 다시 생성합니다.</td></tr></tbody></table>
+<p>중지하거나 실패한 비교는 직전 완료 결과를 유지합니다. 이미 끝난 개별 실행은 각 실행 폴더에서 확인할 수 있습니다.</p><nav class="paging" aria-label="항목 이동"><a href="#compare">← 비교 실행과 반복 실험</a><a href="#cover">표지·목차 ↑</a></nav>
+</section>
+  </main>
+</div>
+<script>
+const search=document.querySelector('#search'), counter=document.querySelector('#matches');
+const previous=document.querySelector('#previous'), next=document.querySelector('#next');
+const list=document.querySelector('#results'), contents=document.querySelector('#contents');
+const sheets=[...document.querySelectorAll('main section')];
+let found=[], cursor=-1;
+function move(index) {
+  if (!found.length) return;
+  cursor=(index+found.length)%found.length;
+  const {sheet,mark}=found[cursor];
+  counter.textContent=(cursor+1)+' / '+found.length;
+  mark.scrollIntoView({block:'center'});
+  history.replaceState(null,'','#'+sheet.id);
+  for (const link of list.querySelectorAll('a')) link.toggleAttribute('aria-current',link.hash==='#'+sheet.id);
+}
+function find() {
+  for (const mark of document.querySelectorAll('main mark')) mark.replaceWith(mark.textContent);
+  for (const sheet of sheets) sheet.normalize();
+  const query=search.value.trim().toLocaleLowerCase();
+  list.replaceChildren();
+  found=[];cursor=-1;
+  list.hidden=!query;contents.hidden=!!query;
+  counter.textContent='';
+  if (query) {
+    for (const sheet of sheets) {
+      const walker=document.createTreeWalker(sheet,NodeFilter.SHOW_TEXT);
+      const matching=[];
+      while (walker.nextNode()) {
+        const value=walker.currentNode;
+        if (!value.parentElement.closest('.paging, .toc') && value.data.toLocaleLowerCase().includes(query)) matching.push(value);
+      }
+      const start=found.length;
+      for (const node of matching) {
+        const text=node.data, lower=text.toLocaleLowerCase();
+        const fragment=document.createDocumentFragment();
+        let offset=0, index;
+        while ((index=lower.indexOf(query,offset))>=0) {
+          const mark=document.createElement('mark');
+          mark.textContent=text.slice(index,index+query.length);
+          fragment.append(text.slice(offset,index),mark);
+          found.push({sheet,mark});offset=index+query.length;
+        }
+        fragment.append(text.slice(offset));node.replaceWith(fragment);
+      }
+      if (found.length>start) {
+        const link=document.createElement('a'), count=document.createElement('small');
+        link.href='#'+sheet.id;
+        link.textContent=sheet.querySelector('h1,h2').textContent;
+        count.textContent=(found.length-start)+'건';
+        link.append(count);
+        link.addEventListener('click',event=>{event.preventDefault();move(start);});
+        list.append(link);
+      }
+    }
+    if (found.length) counter.textContent=found.length+'건';
+    else { list.textContent='검색 결과가 없습니다.';counter.textContent='0건'; }
+  }
+  previous.disabled=next.disabled=!found.length;
+}
+search.addEventListener('input',find);
+search.addEventListener('keydown',event=>{
+  if (event.key==='Enter' && found.length) { event.preventDefault();move(cursor+(event.shiftKey?-1:1)); }
+  if (event.key==='Escape') { search.value='';find(); }
+});
+previous.addEventListener('click',()=>move(cursor<0?found.length-1:cursor-1));
+next.addEventListener('click',()=>move(cursor+1));
+document.querySelector('#pdf').addEventListener('click',()=>window.print());
+</script>
+</body>
+</html>

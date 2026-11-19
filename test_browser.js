@@ -10,7 +10,9 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
   const port=20000+Math.floor(Math.random()*10000)*2;
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), "florasat-browser-"));
   const httpRoot=path.join(profile,"http");fs.mkdirSync(path.join(httpRoot,"data"),{recursive:true});
-  for(const file of ["index.html","app.js","editor.js","orbit.js","csv.js","bundle.js","style.css","data/earth.png"])fs.copyFileSync(path.join(__dirname,file),path.join(httpRoot,file));
+  const brandAsset="manual/assets/Kari_logo.png";
+  fs.mkdirSync(path.join(httpRoot,"manual/assets"),{recursive:true});
+  for(const file of ["index.html","app.js","editor.js","orbit.js","csv.js","bundle.js","style.css","data/earth.png",brandAsset])fs.copyFileSync(path.join(__dirname,file),path.join(httpRoot,file));
   fs.cpSync(path.join(__dirname,"settings"),path.join(httpRoot,"settings"),{recursive:true});
   const referenceManifest=JSON.parse(fs.readFileSync(path.join(__dirname,"testdata/bundle/manifest.json"),"utf8")),referenceFiles={};
   for(const file of Object.keys(referenceManifest.files))referenceFiles[file]=fs.readFileSync(path.join(__dirname,"testdata/bundle",file),"utf8");
@@ -61,6 +63,7 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     assert.equal(await evaluate("document.getElementById('scenarioDetails').open"),true);
     assert.equal(await evaluate("document.querySelector('#iniTable tbody').children.length"),1);
     await evaluate("document.querySelector('#scenarioDetails summary').click();iniFilter.value='';iniFilter.oninput()");
+    assert(await evaluate("document.querySelector('.brand-logo').naturalWidth>0"));
     console.log("Scenario UI passed: concise conditions, details collapsed by default, disclosure and search work");
     assert.equal(await evaluate("document.getElementById('cfgName').disabled"),false);
     assert(await evaluate("document.getElementById('runnerActions').checkVisibility() && !document.getElementById('btnOpenIni').checkVisibility()"));
@@ -194,10 +197,12 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
 
     const offline = path.join(profile, "offline");
     fs.mkdirSync(path.join(offline, "data"), {recursive:true});
-    for (const file of ["index.html", "app.js","editor.js", "orbit.js", "csv.js", "bundle.js", "style.css", "data/latest_result.js", "data/earth.png"])
+    fs.mkdirSync(path.join(offline,"manual/assets"),{recursive:true});
+    for (const file of ["index.html", "app.js","editor.js", "orbit.js", "csv.js", "bundle.js", "style.css", "data/latest_result.js", "data/earth.png",brandAsset])
       fs.copyFileSync(path.join(httpRoot,file),path.join(offline,file));
     await send("Page.navigate", {url: require("node:url").pathToFileURL(path.join(offline, "index.html")).href});
     await retry(async()=> assert(await evaluate("location.protocol === 'file:' && typeof resultMeta !== 'undefined' && resultMeta?.replay === true")));
+    assert(await evaluate("document.querySelector('.brand-logo').naturalWidth>0"));
     assert.equal(await evaluate("document.getElementById('cfgName').checkVisibility()"),false);
     assert.equal(await evaluate("document.getElementById('runnerActions').checkVisibility()"),false);
     assert.equal(await evaluate("document.getElementById('savedConfigName').textContent"),"기본 통신");

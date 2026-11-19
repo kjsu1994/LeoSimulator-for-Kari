@@ -23,7 +23,7 @@ def stage(destination, executable):
     destination.mkdir(parents=True, exist_ok=False)
     for name in SOURCE_FILES:
         shutil.copy2(ROOT / name, destination / name)
-    for name in ("engine", "settings", "licenses", "testdata", "source-dependencies"):
+    for name in ("engine", "settings", "licenses", "testdata", "source-dependencies", "manual"):
         shutil.copytree(ROOT / name, destination / name,
                         ignore=shutil.ignore_patterns("__pycache__", "*.o", "*.obj"))
     shutil.copy2(executable, destination / "sim-ui.exe")
