@@ -1,0 +1,571 @@
+# Shared Walker-Delta constellation, traffic and routing scenarios.
+# NASA DSN + ESA ESTRACK ground stations, ships and aircraft on regular routes.
+# downlink: station -> (GSL) -> satellites -> ISLs -> (GSL) -> ship/aircraft
+# (uplink ship/aircraft -> station is implemented but switched off in the configs for now)
+
+[General]
+network = Florasat.Dijkstra132.LeoDijkstra
+rng-class = "cMersenneTwister"
+seed-0-mt = 23542
+simtime-resolution = -11
+sim-time-limit = 600s
+cmdenv-express-mode = true
+cmdenv-status-frequency = 30s
+output-scalar-file = ${resultdir}/${configname}-${runnumber}.sca
+output-vector-file = ${resultdir}/${configname}-${runnumber}.vec
+
+# ---------------- constellation (Walker-Delta 132/12/1, 550 km, 53 deg) ----------------
+*.numSatellites = 132
+*.constellationCreator.enabled = true
+*.constellationCreator.raanSpread = 360
+*.constellationCreator.inclination = 53
+*.constellationCreator.altitude = 550
+*.constellationCreator.baseYear = 20
+*.constellationCreator.baseDay = 1.5
+*.constellationCreator.epochYear = 20
+*.constellationCreator.epochDay = 1.5
+*.**.planeCount = 12                 # also used by topologyControl
+*.**.interPlaneSpacing = 1           # Walker phasing F
+**.allowUnevenPlanes = false
+**.intraPlaneIslDisabled = false
+**.interPlaneIslDisabled = false
+*.satellite[*].NoradModule.satIndex = 0
+*.satellite[*].NoradModule.satName = ""
+**.satellite[*].**.initFromDisplayString = false
+*.satellite[*].mobility.faceForward = false
+*.satellite[*].noradModuleType = "Sat_Mob_NoradA"
+
+*.topologyControl.walkerType = "DELTA"
+*.topologyControl.updateInterval = 1s
+*.topologyControl.timeSliceLength = 5000ms
+*.topologyControl.minimumElevation = 10     # ground station <-> satellite (132 sats: 25 deg leaves large gaps)
+*.topologyControl.islDatarate = 100000000      # 100 Mbit/s
+*.topologyControl.groundlinkDatarate = 50000000
+*.topologyControl.channelLineWidth = 0         # hide Qtenv channel arrows; links drawn on the map
+*.**.numGroundLinks = 40
+
+# ---------------- routing ----------------
+*.satellite[*].net.routingType = "Sat_Net_DijkstraRouting"
+*.satellite[*].net.routing.metric = "delay"    # "delay" | "hop"
+*.satellite[*].net.routing.dstStation = -1     # -1 = nearest station
+*.terminal[*].net.routingType = "Ter_Net_DDRARouting"
+**.maxHops = 64
+
+# ---------------- visualization ----------------
+# map (src/mapvis): satellites, stations, ISL/GSL, footprints, info box, SVG snapshots
+*.mapVisualizer.refreshInterval = 1s
+*.mapVisualizer.footprints = "gsl"
+*.mapVisualizer.trails = ""
+*.mapVisualizer.svgSnapshotTimes = ""          # e.g. "600 1200" (also works in Cmdenv)
+*.mapVisualizer.svgSnapshotPrefix = "results/map"
+# routes (FloraMapDataSource): one colour per packet route, fading out, with label
+*.mapDataSource.maxRoutes = 8
+*.mapDataSource.routeLifetime = 30s
+*.mapDataSource.routeLogFile = "results/routes.csv"
+*.mapDataSource.graphLogFile = ""
+*.visualizer.canvasVisualizer.mediumVisualizer.typename = ""
+*.visualizer.osgVisualizer.typename = ""      # INET built without OSG
+*.visualizer.*.dataLinkVisualizer.displayLinks = false
+*.visualizer.*.mobilityVisualizer.displayMovementTrails = false
+
+# ---------------- ground segment ----------------
+include stations/EsaDsn-Mobiles.ini
+*.station[*].**.minimumElevation = 10
+**.station[*].endToEndStatistics = true
+
+# ---------------- terminals (DSL uplink, copied from Custom_default) ----------------
+**.numTerminals = 30
+include ../Custom_default/devices/WorldWide-30.ini
+*.satellite[*].phyDSL.radio.antenna.mobilityModule = "^.^.^.mobility"
+*.satellite[*].phyISL.radio.antenna.mobilityModule = "^.^.^.mobility"
+*.satellite[*].phyGSL.radio.antenna.mobilityModule = "^.^.^.mobility"
+*.satellite[*].phyDSL.radio.typename = "Sat_Dsl_Phy_CustomRadio"
+*.satellite[*].phyDSL.radio.antenna.typename = "CustomAntenna"
+*.satellite[*].phyDSL.radio.transmitter.typename = "CustomTransmitter"
+*.satellite[*].phyDSL.radio.transmitter.preambleDuration = 2.5s
+*.satellite[*].phyDSL.radio.transmitter.headerLength = 8B
+*.satellite[*].phyDSL.radio.receiver.typename = "CustomReceiver"
+*.satellite[*].phyDSL.radio.receiver.sensitivity = -120dBm
+*.satellite[*].**.interfaceTableModule = ""
+**.radioMedium.pathLoss.typename = "CustomPHYPathLoss"
+**.radioMedium.pathLoss.polarizationLoss = 3dB
+**.radioMedium.pathLoss.fadingSigma = 4dB
+**.radioMedium.pathLoss.receiverSystemLoss = 4dB
+**.radioMedium.pathLoss.decodingImplementation = 1.5dB
+**.radioMedium.pathLoss.noiseFigureEnhancement = 3dB
+**.radioMedium.typename = "CustomMedium"
+**.radioMedium.analogModel.typename = "CustomPHYAnalogModel"
+**.radioMedium.analogModel.rxAntennaGain_a = 0
+**.radioMedium.analogModel.rxAntennaGain_b = 0
+**.radioMedium.analogModel.rxAntennaGain_c = 1
+**.radioMedium.analogModel.enableDoppler = false
+**.radioMedium.backgroundNoise.power = 0dBm
+**.radioMedium.analogModel.pathLossExponent = 2.0
+**.radioMedium.analogModel.obstructionLossdB = 0dB
+**.radioMedium.minimumElevationTermSat = 5.0
+**.enableCollisions = true
+**.enableCollisionOverlap = false
+**.minCollisionOverlap = 0s
+**.normalizedLoad_txBwHz = 100e3
+**.normalizedLoad_maxDoppShiftHz = 10000.0
+**.normalizedLoad_k = 295.0
+**.normalizedLoad_n = 300.0
+**.normalizedLoad_symb = 2.0
+**.perFromLoad_a = 3
+**.perFromLoad_b = 4.0
+**.perFromLoad_c = 3.0
+**.maxTUs = 100
+**.cn0ThresholdForTU = 30.0
+**.useLoadCn0PerCsv = false
+*.terminal[*].phy.radio.typename = "Ter_Phy_CustomRadio"
+*.terminal[*].phy.radio.antenna.mobilityModule = "^.^.^.mob"
+*.terminal[*].dlk.mac.interfaceTableModule = ""
+**.radio.energyConsumer.typename = "CustomEnergyConsumer"
+**.radio.energyConsumer.energySourceModule = "^.IdealEpEnergyStorage"
+**.maxTransmissionDuration = 1s
+*.terminal[*].**.minimumElevationTermSat = 5.0
+*.terminal[*].phy.radio.antenna.typename = "CustomAntenna"
+*.terminal[*].phy.radio.transmitter.typename = "CustomTransmitter"
+*.terminal[*].phy.radio.transmitter.preambleDuration = 2.5s
+*.terminal[*].phy.radio.transmitter.headerLength = 8B
+*.terminal[*].phy.radio.receiver.typename = "CustomReceiver"
+*.terminal[*].phy.radio.receiver.sensitivity = -120dBm
+**.radio.receiver.snirThreshold = -8dB
+# routing statistics (must precede StatisticRecording.ini, which switches result recording off by default)
+**.routing.pathHops.result-recording-modes = default
+**.routing.pathDelay.result-recording-modes = default
+**.traffic.e2eDelay.result-recording-modes = default
+**.traffic.e2eHops.result-recording-modes = default
+**.traffic.gsPacketSent.result-recording-modes = default
+**.traffic.gsPacketReceived.result-recording-modes = default
+include ../Custom_default/configurations/StatisticRecording.ini
+# the following files define [Config ...] sections, so they must come last
+include ../Custom_default/configurations/BlindTx.ini
+include ../Custom_default/configurations/BandSelection.ini
+include ../Custom_default/configurations/Services.ini
+
+[Config Dijkstra132]
+*.satellite[*].net.routing.metric = "delay"
+*.satellite[*].net.routing.algorithm = "dijkstra-delay"
+*.satellite[*].net.routingType = "Sat_Net_DijkstraRouting"
+*.satellite[*].net.routing.service = "LS"
+description = "Downlink (station -> ship/aircraft), delay-shortest path; mobile uplink off for now"
+extends = BlindKineis, UHF, ServiceEveryMinute
+**.numTerminals = 0
+*.station[0..8].traffic.enabled = true
+*.station[0..8].traffic.dstType = "mobile"     # downlink: stations -> ships / aircraft
+*.station[9..12].traffic.enabled = false       # uplink (ships / aircraft -> stations): later
+*.station[9..12].traffic.dstType = "station"   #   set enabled = true above to switch it on
+*.station[*].traffic.sendInterval = 2s
+*.station[*].traffic.packetSize = 1000B
+
+[Config Dijkstra132Hop]
+description = "Same traffic, hop-count shortest path (delay tie-break)"
+extends = Dijkstra132
+*.satellite[*].net.routing.metric = "hop"
+
+[Config Dijkstra132Pair]
+description = "Single downlink flow Goldstone (DSN) -> Flight ICN-LAX for easy visual tracking"
+extends = Dijkstra132
+*.station[0].traffic.dstStation = 11
+*.station[0].traffic.sendInterval = 1s
+*.station[1..8].traffic.enabled = false
+
+[Config Dijkstra132StationsOnly]
+*.satellite[*].net.routing.algorithm = "dijkstra-delay"
+*.satellite[*].net.routingType = "Sat_Net_DijkstraRouting"
+*.satellite[*].net.routing.metric = "delay"
+description = "Station -> station traffic only (previous baseline)"
+extends = Dijkstra132
+*.station[0..8].traffic.dstType = "station"
+
+[Config Dijkstra132Terminals]
+description = "IoT terminals (DSL radio uplink) -> nearest station. NOTE: uplink link budget not tuned yet"
+extends = BlindKineis, UHF, ServiceEveryMinute
+
+[Config Mcsr132]
+*.native.controlMtu = 1500
+*.native.controlReassemblyTimeout = 3
+*.native.controlResyncInterval = 30
+*.station[0].traffic.dstStation = 12
+*.station[0].traffic.dstType = "mobile"
+*.station[1].traffic.dstStation = 12
+*.station[1].traffic.dstType = "mobile"
+*.station[2].traffic.dstStation = 12
+*.station[2].traffic.dstType = "mobile"
+*.station[3].traffic.dstStation = 12
+*.station[3].traffic.dstType = "mobile"
+*.station[4].traffic.dstStation = 12
+*.station[4].traffic.dstType = "mobile"
+*.station[5].traffic.dstStation = 12
+*.station[5].traffic.dstType = "mobile"
+*.station[6].traffic.dstStation = 12
+*.station[6].traffic.dstType = "mobile"
+*.station[7].traffic.dstStation = 12
+*.station[7].traffic.dstType = "mobile"
+*.station[8].traffic.dstStation = 12
+*.station[8].traffic.dstType = "mobile"
+*.numSatellites = 132
+*.**.planeCount = 12
+*.constellationCreator.altitude = 550
+*.constellationCreator.inclination = 53
+sim-time-limit = 600
+seed-0-mt = 23542
+*.topologyControl.islDatarate = 100000000
+*.topologyControl.groundlinkDatarate = 50000000
+*.topologyControl.minimumElevation = 10
+*.satellite[*].net.packetHandler.queueCapacity = 500
+*.topologyControl.updateInterval = 1
+*.satellite[*].net.routing.hrJitterMs = 15
+*.satellite[*].net.routing.tsDelayBoundMs = -1
+*.satellite[*].net.routing.jitterWindow = 30
+*.satellite[*].net.routing.refreshInterval = 0
+*.satellite[*].net.routing.flowTimeout = 120
+*.satellite[*].net.routing.csibPeriod = 180
+*.satellite[*].net.routing.csibMonitorInterval = 0
+*.satellite[*].net.routing.csibMessageBytes = 0
+*.topologyControl.slsInterval = 0.2
+*.topologyControl.slsMissCount = 3
+*.satellite[*].net.routing.srdK = 0
+*.satellite[*].net.routing.srdL = 0
+*.satellite[*].net.routing.reservedPaths = false
+*.satellite[*].net.routing.snapshotOnDelayUpdate = true
+*.satellite[*].net.routing.csibEnabled = false
+*.satellite[*].net.routing.csibVote = true
+*.satellite[*].net.routing.congestionAware = false
+*.satellite[*].net.routing.jitterSource = "arrival"
+*.satellite[*].net.routing.floodModel = "paper"
+*.native.congestionMode = "actual"
+*.islFailures.schedule = ""
+*.topologyControl.failureKnowledge = "instant"
+*.congestion.zones = ""
+*.native.routeRecording = "full"
+*.islFailures.randomFailures = 0
+*.islFailures.randomStart = 0
+*.islFailures.randomEnd = 0
+*.islFailures.randomDuration = 0
+seed-1-mt = 4242
+*.congestion.refreshInterval = 5
+*.congestion.queueCapacity = 500
+*.congestion.packetBytes = 1380
+*.native.processingMode = "neutral"
+*.native.controlMode = "packet"
+*.native.jitterModel = "packet"
+*.native.islMode = "fixed"
+*.native.controlRefresh = 5
+*.native.controlTimeout = 3
+*.native.controlHeaderBytes = 32
+*.native.controlRecordBytes = 48
+*.native.packetTrace = false
+*.station[0].traffic.enabled = true
+*.station[1].traffic.enabled = true
+*.station[2].traffic.enabled = true
+*.station[3].traffic.enabled = true
+*.station[4].traffic.enabled = true
+*.station[5].traffic.enabled = true
+*.station[6].traffic.enabled = true
+*.station[7].traffic.enabled = true
+*.station[8].traffic.enabled = true
+*.station[9].traffic.enabled = false
+*.station[10].traffic.enabled = false
+*.station[11].traffic.enabled = false
+*.station[12].traffic.enabled = false
+*.station[0].traffic.sendInterval = 0.001
+*.station[1].traffic.sendInterval = 0.001
+*.station[2].traffic.sendInterval = 0.001
+*.station[3].traffic.sendInterval = 0.001
+*.station[4].traffic.sendInterval = 0.001
+*.station[5].traffic.sendInterval = 0.001
+*.station[6].traffic.sendInterval = 0.001
+*.station[7].traffic.sendInterval = 0.001
+*.station[8].traffic.sendInterval = 0.001
+*.congestion.scenarioFile = "scenarios/default-scenario-00455a29dd14.json"
+description = "MCSR routing, latency-sensitive (LS) service; same downlink traffic as Dijkstra132"
+extends = Dijkstra132
+*.satellite[*].net.routingType = "Sat_Net_McsrRouting"
+*.satellite[*].net.routing.service = "LS"
+*.satellite[*].net.routing.queueCapacity = 100
+*.satellite[*].net.routing.labelCap = 32
+*.mapDataSource.routeLogFile = "results/routes-${configname}.csv"
+*.mapDataSource.graphLogFile = ""              # graph snapshots are only needed for verify_routes.py
+
+
+[Config Mcsr132TS]
+description = "MCSR routing, throughput-sensitive (TS) service: largest available buffer"
+extends = Mcsr132
+*.satellite[*].net.routing.service = "TS"
+
+
+[Config Mcsr132HR]
+description = "MCSR routing, high-reliability (HR) service: jitter < 15 ms, then largest available buffer"
+extends = Mcsr132
+*.satellite[*].net.routing.service = "HR"
+
+
+[Config Mcsr132Pair]
+description = "MCSR: single downlink flow Goldstone (DSN) -> Flight ICN-LAX for easy visual tracking"
+extends = Mcsr132
+*.station[0].traffic.dstStation = 11
+*.station[0].traffic.sendInterval = 1s
+*.station[1..8].traffic.enabled = false
+
+# ---------------- ISL failure experiments (resilience, MCSR Sec. V) ----------------
+# IslFailureInjector (src/Global/Topology_Control) cuts ISLs and brings them back; routing modules are
+# told immediately. "route@T+D" cuts the middle ISL of the route the routing module reported last, so the
+# failure hits the path in use whichever algorithm chose it (same failures for Dijkstra and MCSR).
+# The injector draws from its own random-number stream, so random failures are identical in all configs.
+
+[Config IslFailures]
+abstract = true
+num-rngs = 2
+seed-1-mt = 4242
+*.islFailures.rng-0 = 1
+*.islFailures.logFile = "results/failures-${configname}-${runnumber}.csv"
+
+
+[Config Mcsr132PairFail]
+description = "MCSR, 1 flow (50 pkt/s) Goldstone -> Flight ICN-LAX; the path in use is cut at 60/120/180 s for 30 s"
+extends = Mcsr132Pair, IslFailures
+sim-time-limit = 300s
+*.station[0].traffic.sendInterval = 20ms        # many packets in flight so the cut hits packets on the path
+*.islFailures.schedule = "route@60+30 route@120+30 route@180+30"
+
+
+[Config Dijkstra132PairFail]
+description = "Dijkstra baseline for Mcsr132PairFail: identical traffic and failures"
+extends = Dijkstra132Pair, IslFailures
+sim-time-limit = 300s
+*.station[0].traffic.sendInterval = 20ms
+*.islFailures.schedule = "route@60+30 route@120+30 route@180+30"
+
+
+[Config Mcsr132RandomFail]
+description = "MCSR, default downlink traffic, 20 random ISL failures of 30 s between 30 and 570 s"
+extends = Mcsr132, IslFailures
+*.islFailures.randomFailures = 20
+*.islFailures.randomStart = 30s
+*.islFailures.randomEnd = 570s
+*.islFailures.randomDuration = 30s
+
+
+[Config Dijkstra132RandomFail]
+description = "Dijkstra baseline for Mcsr132RandomFail: identical traffic and failures"
+extends = Dijkstra132, IslFailures
+*.islFailures.randomFailures = 20
+*.islFailures.randomStart = 30s
+*.islFailures.randomEnd = 570s
+*.islFailures.randomDuration = 30s
+
+
+[Config PaperS1]
+description = "Paper environment: Starlink S1 + 100 city GS, CBR Rio de Janeiro (station[18]) -> Sankt Peterburg (station[73]); Dijkstra routing"
+extends = BlindKineis, UHF, ServiceEveryMinute
+sim-time-limit = 200s
+**.numTerminals = 0
+include stations/WorldCities100.ini
+*.numSatellites = 1584
+*.**.planeCount = 72
+*.**.interPlaneSpacing = 1                         # phase factor f = 1
+*.constellationCreator.altitude = 550
+*.constellationCreator.inclination = 53
+*.topologyControl.minimumElevation = 25.0
+*.station[*].**.minimumElevation = 25.0
+*.topologyControl.islDatarate = 1000000000         # ISL 1 Gbit/s
+*.topologyControl.groundlinkDatarate = 100000000   # GSL 100 Mbit/s
+*.satellite[*].net.packetHandler.queueCapacity = 500   # buffer queue length B
+# NOTE: OMNeT++ uses the FIRST matching ini line, so the specific station[18] line must come before the wildcard
+*.station[18].traffic.enabled = true
+*.station[*].traffic.enabled = false
+*.station[*].traffic.packetSize = 1380B
+*.station[18].traffic.dstType = "station"
+*.station[18].traffic.dstStation = 73
+*.station[18].traffic.startTime = 1s
+*.station[18].traffic.sendInterval = 1380*8/(${rateMbps=10,20,30,40,50}*1e6)*1s   # CBR of rateMbps Mbit/s
+*.mapDataSource.routeLogFile = "results/routes-${configname}-${rateMbps}.csv"
+*.mapDataSource.failureRouteSrc = 18                # "route@T" cuts follow the measured flow only (matters with background load)
+*.mapDataSource.failureRouteDst = 73
+*.station[73].traffic.flowSrc = 18                  # QoS/gap statistics of the measured flow only (background flows excluded)
+*.mapDataSource.graphLogFile = ""
+
+
+[Config PaperS1Load]
+description = "Paper environment, background load: the 20 largest cities send CBR to random cities (all rates 10..50 Mbit/s)"
+extends = PaperS1
+*.station[0..19].traffic.enabled = true
+*.station[0..19].traffic.dstType = "station"
+*.station[0..19].traffic.dstStation = -1
+*.station[0..19].traffic.startTime = uniform(1s, 3s)
+*.station[0..19].traffic.sendInterval = 1380*8/(${rateMbps}*1e6)*1s
+
+
+[Config PaperS1Mcsr]
+description = "Paper environment, MCSR-LS (latency-sensitive)"
+extends = PaperS1
+*.satellite[*].net.routingType = "Sat_Net_McsrRouting"
+*.satellite[*].net.routing.service = "LS"
+*.satellite[*].net.routing.labelCap = 32
+*.satellite[*].net.routing.jitterSource = "arrival"
+*.satellite[*].net.routing.snapshotOnDelayUpdate = false   # do not rebuild the 1584-satellite snapshot at every 1 s delay update
+*.satellite[*].net.routing.refreshInterval = 5s    # A and J follow the traffic every 5 s (lower = more accurate, much slower)
+
+
+[Config PaperS1McsrTS]
+description = "Paper environment, MCSR-TS (throughput-sensitive)"
+extends = PaperS1Mcsr
+*.satellite[*].net.routing.service = "TS"
+
+
+[Config PaperS1McsrHR]
+description = "Paper environment, MCSR-HR (high-reliability: jitter < 15 ms, then largest buffer)"
+extends = PaperS1Mcsr
+*.satellite[*].net.routing.service = "HR"
+
+
+[Config PaperS1Dijkstra]
+description = "Paper environment, delay-shortest-path baseline (SPF)"
+extends = PaperS1
+*.satellite[*].net.routing.metric = "delay"
+
+
+[Config PaperS1McsrFail]
+description = "Paper environment, MCSR-LS with 20 random ISL failures of 30 s (resilient rerouting)"
+extends = PaperS1Mcsr, IslFailures
+*.islFailures.randomFailures = 20
+*.islFailures.randomStart = 20s
+*.islFailures.randomEnd = 170s
+*.islFailures.randomDuration = 30s
+
+
+[Config PaperS1DijkstraFail]
+description = "Paper environment, SPF baseline with the same random ISL failures"
+extends = PaperS1Dijkstra, IslFailures
+*.islFailures.randomFailures = 20
+*.islFailures.randomStart = 20s
+*.islFailures.randomEnd = 170s
+*.islFailures.randomDuration = 30s
+
+# Targeted cuts: the middle ISL of the path currently used by the Rio -> Sankt Peterburg flow is cut for 30 s (x3).
+# The random configs above rarely hit a single path out of ~3000 ISLs; these always do.
+
+[Config PaperS1McsrCut]
+description = "Paper environment, MCSR-LS: the ISL in the middle of the path in use is cut at 60/110/160 s for 30 s"
+extends = PaperS1Mcsr, IslFailures
+*.islFailures.schedule = "route@60+30 route@110+30 route@160+30"
+
+
+[Config PaperS1DijkstraCut]
+description = "Paper environment, SPF baseline with the same targeted cuts"
+extends = PaperS1Dijkstra, IslFailures
+*.islFailures.schedule = "route@60+30 route@110+30 route@160+30"
+
+# ---- regional congestion, environment mode (NOT part of the MCSR paper; mark the results accordingly) ----
+# CongestionInjector: a region is declared congested once (rho, start, duration), no packets are sent. Every ISL with an
+# endpoint inside gets capacity C*(1-rho) and an M/M/1 queueing delay; MCSR sees A' = min(A, 1-rho) and the queue jitter.
+# Geographic zones follow the geography (the loaded satellites change while the constellation moves). Dijkstra sees
+# the extra delay only with congestionAware=true. Zone syntax: see CongestionInjector.ned.
+
+[Config Congestion]
+abstract = true
+*.congestionInjector.logFile = "results/congestion-${configname}-${runnumber}.csv"
+
+# Zone centred on the middle of the Rio -> Sankt Peterburg great circle (22N 19W), radius 1500 km, rho 0.9 from 60 s to 160 s.
+# At 1 Gbit/s the M/M/1 queueing delay is only microseconds, so the zone also carries a 10 ms penalty delay per loaded hop
+# (the "/10"); without it the congestion would barely change the path choice of an SPF that knows the delay.
+
+[Config PaperS1McsrCongestion]
+description = "Paper environment, MCSR-LS, congested region on the path (rho 0.9, 60..160 s) - environment mode, not in the paper"
+extends = PaperS1Mcsr, Congestion
+*.congestionInjector.zones = "circle(22,-19,1500)=0.9/10@60+100"
+
+
+[Config PaperS1DijkstraCongestion]
+description = "Paper environment, SPF baseline, same congested region; SPF does not know about the queueing delay"
+extends = PaperS1Dijkstra, Congestion
+*.congestionInjector.zones = "circle(22,-19,1500)=0.9/10@60+100"
+
+
+[Config PaperS1DijkstraCongestionAware]
+description = "Paper environment, SPF baseline whose link cost includes the injected queueing delay"
+extends = PaperS1DijkstraCongestion
+*.satellite[*].net.routing.congestionAware = true
+
+# ---- failure-knowledge model (T08 detection + T16 recovery decomposition) ----
+# failureKnowledge="propagate": a cut ISL is physically down at once, but a satellite learns of it only after
+#   detection (slsInterval * slsMissCount = 600 ms, temporary assumption) + flooding (floodHopDelay per hop, assumption).
+#   Dijkstra: global flooding + spfDelay;  MCSR: only satellites within failureScopeHops (SRD-like scope) + repairDelay,
+#   the rest is repaired locally on the way.  Until a satellite knows, it routes into the dead link and the packet is lost.
+
+[Config FailureKnowledge]
+abstract = true
+*.topologyControl.failureKnowledge = "propagate"
+# slsInterval (200ms), slsMissCount (3) and floodHopDelay (2ms) keep their NED defaults so they can be swept from the
+# command line, e.g.  "--*.topologyControl.floodHopDelay=50ms"  (a value written here would win over the command line)
+*.station[*].traffic.gapThreshold = 100ms
+*.station[*].traffic.gapLogFile = "results/gaps-${configname}-${runnumber}.csv"
+
+
+[Config PaperS1McsrCutFlood]
+description = "Paper environment, MCSR-LS, targeted cuts with detection + scoped flooding + local repair"
+extends = PaperS1McsrCut, FailureKnowledge
+*.satellite[*].net.routing.failureScopeHops = 6
+*.satellite[*].net.routing.repairDelay = 5ms
+
+
+[Config PaperS1DijkstraCutFlood]
+description = "Paper environment, SPF baseline, same cuts with detection + global flooding + SPF delay"
+extends = PaperS1DijkstraCut, FailureKnowledge
+*.satellite[*].net.routing.spfDelay = 50ms
+
+
+[Config PaperS1McsrCutFloodRes]
+description = "Paper environment, MCSR-LS with reserved dominant paths: on a lost link/exit switch to a stored path (suffix from the noticing satellite), recompute only if none is usable"
+extends = PaperS1McsrCutFlood
+*.satellite[*].net.routing.reservedPaths = true
+*.satellite[*].net.routing.reserveDelay = 1ms
+
+# ---- background load (A/J differ between paths, so dominant path sets are larger than one path) ----
+# Kept light on purpose: MCSR with 19 background flows ran ~100x slower than real time. 4 background sources and one cut
+# in 100 s are enough to see whether stored dominant paths are used.
+# LoadBackground must be listed FIRST in "extends": the first matching ini line wins, and PaperS1 switches all stations off.
+# station[18] (the measured flow towards station[73]) is not among the background sources; none of them sends to 73.
+
+[Config LoadBackground]
+abstract = true
+sim-time-limit = 100s
+*.islFailures.schedule = "route@60+30"
+# Fixed destinations: a random destination per packet makes every packet a new (satellite, destination) planning problem
+# (73k plan computations in the access phase vs 325 without background flows) and the run ~15x slower than Dijkstra.
+*.station[0..3].traffic.enabled = true
+*.station[0..3].traffic.dstType = "station"
+*.station[0].traffic.dstStation = 7
+*.station[1].traffic.dstStation = 2
+*.station[2].traffic.dstStation = 11
+*.station[3].traffic.dstStation = 4
+*.station[0..3].traffic.startTime = uniform(1s, 3s)
+*.station[0..3].traffic.sendInterval = 1380*8/(${rateMbps}*1e6)*1s
+
+
+[Config PaperS1DijkstraCutFloodLoad]
+extends = LoadBackground, PaperS1DijkstraCutFlood
+
+
+[Config PaperS1McsrCutFloodLoad]
+extends = LoadBackground, PaperS1McsrCutFlood
+
+
+[Config PaperS1McsrCutFloodResLoad]
+extends = LoadBackground, PaperS1McsrCutFloodRes
+
+# ---- DS / CSIB time model (paper Sec. III-C, V-C; time model only, NO SLS/CSIB packets are sent) ----
+# Every satellite plans on the CSIB version that has already reached it (computed over the live intra-SRD ISL graph).
+# Processing/serialisation times are assumptions (the paper gives none): the defaults are 0 = propagation only.
+# Link-failure CSIBs need failureKnowledge="propagate" (FailureKnowledge). NOT compiled/run in the sandbox: build in Docker first.
+
+[Config PaperS1McsrCsib]
+description = "Paper environment, MCSR-LS with DS/CSIB time model (periodic 180 s, vote, per-satellite applied version)"
+extends = PaperS1Mcsr
+*.satellite[*].net.routing.csibEnabled = true
+*.satellite[*].net.routing.csibPeriod = 180s
+*.satellite[*].net.routing.csibVote = true
+
+

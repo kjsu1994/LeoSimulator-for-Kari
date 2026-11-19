@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>LEO Network Simulator</title>
-  <link rel="stylesheet" href="style.css?v=20261118-map-load-1">
+  <link rel="stylesheet" href="style.css?v=20261119-help">
 </head>
 <body>
   <header class="topbar">
@@ -62,6 +62,7 @@
             </select>
             <strong id="savedConfigName" class="saved-config" hidden></strong>
           </label>
+          <p id="scenarioMeaning" class="quiet span-2" aria-live="polite" hidden></p>
           <label class="span-2 additional-configs"><input id="showAllConfigs" type="checkbox"> 추가 시험 표시</label>
           <label class="span-2" id="algorithmField"><span>알고리즘</span><select id="algorithmChoice" aria-label="실행 알고리즘"></select></label>
           <dl class="scenario-facts span-2" aria-label="시나리오 정보">
@@ -155,10 +156,10 @@
   <script src="csv.js?v=20261118-map-load-1"></script>
   <script src="bundle.js?v=20261118-map-load-1"></script>
   <script src="orbit.js?v=20261118-map-load-1"></script>
-  <script src="app.js?v=20261118-map-load-1"></script>
-<dialog id="settingsDialog"><form id="settingsForm"><div class="dialog-heading"><h2>시험 조건</h2><button type="button" data-close="settingsDialog" aria-label="닫기">×</button></div><div id="settingsFields"></div><p id="settingsError" class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="settingsDialog">취소</button><button type="submit" class="btn-primary">INI에 저장</button></div></form></dialog>
+  <script src="app.js?v=20261119-help"></script>
+<dialog id="settingsDialog"><form id="settingsForm"><div class="dialog-heading"><h2>시험 조건</h2><button type="button" data-close="settingsDialog" aria-label="닫기">×</button></div><div id="settingsFields"></div><p id="settingsError" class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" id="settingsDefaults" title="선택한 구성의 제공 설정을 불러옵니다. 상속값은 현재 상위 설정을 따릅니다.">기본값</button><span id="settingsDefaultsStatus" class="quiet" role="status"></span><button type="button" data-close="settingsDialog">취소</button><button type="submit" class="btn-primary">INI에 저장</button></div></form></dialog>
 <dialog id="compareDialog"><div class="dialog-heading"><h2>실행 비교</h2><button data-close="compareDialog" aria-label="닫기">×</button></div><div id="singleComparisonControls" class="compare-controls"><label>기준 실행<select id="baselineRun"></select></label><label>비교 실행<select id="scenarioRun"></select></label><button id="loadComparison" class="btn-primary">비교</button><label class="file-btn">기준 폴더<input id="baselineFolder" type="file" webkitdirectory multiple hidden></label><label class="file-btn">비교 폴더<input id="comparisonFolder" type="file" webkitdirectory multiple hidden></label></div><div id="experimentHistoryRow" class="compare-controls" hidden><label>반복 실험<select id="experimentHistory"></select></label><button id="loadExperiment" type="button">통계 보기</button></div><p id="comparisonStatus" role="status"></p><div id="comparisonContent"></div></dialog>
 <dialog id="experimentDialog"><form id="experimentForm"><div class="dialog-heading"><h2>비교 실행</h2><button type="button" data-close="experimentDialog" aria-label="닫기">×</button></div><div id="experimentAlgorithms" class="editor-grid"></div><div class="editor-grid"><label class="editor-field"><span>반복 횟수</span><select id="experimentRepetitions"><option value="1">1회</option><option value="10">10회 · 예비 시험</option><option value="30">30회 · 최종 비교</option></select></label></div><details class="experiment-options"><summary>고급 설정</summary><div class="editor-grid"><label class="editor-field"><span>시작 시드</span><input id="experimentSeed" required type="number" min="0" max="2147483547" step="1"></label><label class="editor-field"><span>준비 구간 (s)</span><input id="experimentWarmup" required type="number" min="0" step="any"></label><label class="editor-field"><span>종료 관측 구간 (s)</span><input id="experimentDrain" required type="number" min="0" step="any"></label></div></details><p id="experimentConditions" class="quiet" style="padding:0 20px"></p><p id="experimentError" class="form-error" role="alert"></p><div class="dialog-actions"><button type="button" data-close="experimentDialog">취소</button><button type="submit" class="btn-primary">실행</button></div></form></dialog>
-<script src="editor.js?v=20261118-map-load-1"></script>
+<script src="editor.js?v=20261119-help"></script>
 </body>
 </html>

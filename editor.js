@@ -3,6 +3,136 @@
 const nativeUI={config:null,scenario:{schema:1,method:"environment",entries:[]},entryIndex:-1,drawing:null,baseline:null};
 const byId=id=>document.getElementById(id);
 function node(tag,attrs={},text){const e=document.createElement(tag);for(const [k,v]of Object.entries(attrs)){if(k==="class")e.className=v;else if(k in e)e[k]=v;else e.setAttribute(k,v);}if(text!==undefined)e.textContent=text;return e;}
+const settingHelp={
+  experimentRepetitions:"같은 조건에서 알고리즘별 실행을 시드 수만큼 반복합니다. 선택한 알고리즘 수와 곱하면 전체 실행 횟수입니다.",
+  experimentSeed:"첫 반복에 사용할 시드입니다. 다음 반복은 시드를 하나씩 증가시킵니다.",
+  experimentWarmup:"초기 상태가 자리 잡도록 기다리는 시간입니다. 이 구간에서 생성된 패킷은 측정 집계에서 제외합니다.",
+  experimentDrain:"새 송신을 멈춘 뒤 이미 발생한 패킷이 도착할 시간을 확보합니다.",
+  numSatellites:"위성이 많아지면 접속 가능한 위성과 우회 후보가 달라집니다. 전달률과 계산 시간의 변화를 확인하세요.",
+  planes:"위성을 나누어 배치할 궤도면 수입니다. 위성 수는 궤도면 수로 나누어 떨어져야 합니다.",
+  altitude:"궤도 높이입니다. 높이면 보이는 범위와 전파 이동 거리가 함께 달라집니다.",
+  inclination:"궤도면과 적도 사이의 각도입니다. 지역별 위성 접속 기회가 달라집니다.",
+  simTimeLimit:"시뮬레이션의 종료 시각입니다. 장애가 발생한 뒤 복구까지 관측할 시간을 확보하세요.",
+  seed:"무작위 송신 시작, 목적지, 링크 손실·지터에 쓰이는 시드입니다. 같은 조건과 시드로 재현할 수 있습니다.",
+  destination:"선택한 송신 노드에서 보낼 목적지입니다. 무작위를 선택하면 대상 유형에 맞는 노드 중에서 선택합니다.",
+  packetSize:"한 번에 보내는 데이터 크기입니다. 크기가 커지면 전송 시간이 길어지며 현재 송신률을 기준으로 간격도 조정됩니다.",
+  bitrate:"송신 노드 하나가 초당 발생시키는 데이터량입니다. 수신 화면의 실제 처리량과 비교하세요.",
+  sendInterval:"연속 송신 사이의 시간입니다. 줄이면 초당 패킷 수와 큐 부하가 늘어납니다.",
+  startTime:"송신을 시작할 시각입니다. 빈값은 INI에 정의된 기존 방식이나 범위를 유지합니다.",
+  endTime:"새 패킷을 만들지 않는 시각입니다. 실행 시간보다 이르게 두면 남은 패킷이 도착하는 동안 관측할 수 있습니다.",
+  islDatarate:"위성 간 링크의 전송 용량입니다. 줄이면 정체 시 대기·폐기가 늘어날 수 있습니다.",
+  groundlinkDatarate:"지상과 위성 사이의 전송 용량입니다. 송신률을 높일 때 지상 링크가 병목이 되는지 확인하세요.",
+  minimumElevation:"지상에서 위성이 이 각도 이상 보여야 연결됩니다. 값을 높이면 접속 기회가 줄어들 수 있습니다.",
+  queueCapacity:"링크에서 대기할 수 있는 패킷 수입니다. 상한에 도달하면 새 패킷을 폐기하며, 0은 무제한입니다.",
+  updateInterval:"위치와 연결을 다시 계산하는 간격입니다. 줄이면 연결 변화를 더 촘촘히 반영하고 계산량이 늘어날 수 있습니다.",
+  islMode:"고정 격자는 기본 위성 연결을 사용합니다. 계획된 개폐는 가져온 일정에 따라 해당 링크를 끊고 복구합니다.",
+  islScheduleFile:"계획된 링크 개폐를 읽는 기존 파일 경로입니다.",
+  failureSchedule:"예를 들어 route@60+30은 60초에 기준 경로의 링크를 30초간 끊습니다. 12-13@60+30처럼 링크를 직접 지정할 수도 있습니다.",
+  failureKnowledge:"시간 모델에서 장애 정보를 즉시 반영하거나 감지·전파 시간이 흐른 뒤 반영합니다.",
+  failureReplay:"과거 장애 일정을 다시 적용할 파일의 경로입니다.",
+  randomFailures:"지정 구간에서 생성할 무작위 링크 장애의 수입니다. 0이면 생성하지 않습니다.",
+  randomStart:"무작위 장애가 처음 발생할 수 있는 시각입니다.",
+  randomEnd:"무작위 장애를 발생시킬 구간의 마지막 시각입니다.",
+  randomDuration:"각 무작위 장애의 지속 시간입니다. 0이면 자동으로 복구하지 않습니다.",
+  failureSeed:"무작위 장애의 링크와 시각을 정하는 시드입니다. 알고리즘을 비교할 때 같은 시드를 사용하세요.",
+  congestionMode:"실제 큐는 송신 트래픽으로 생긴 정체를 측정합니다. 환경 효과 주입은 지정한 구역과 링크에 추가 혼잡을 적용합니다.",
+  congestionRefresh:"환경 효과의 적용 대상을 다시 확인하는 간격입니다. 이동하는 위성과 지리 구역을 비교할 때 사용합니다.",
+  congestionBuffer:"환경 혼잡 계산에 쓰는 가정 큐 크기입니다. 실제 패킷 큐 용량은 링크 설정에서 바꿉니다.",
+  congestionPacketBytes:"환경 혼잡 계산에서 가정하는 패킷 크기입니다.",
+  congestionZones:"INI에 정의된 기존 혼잡 구역 표현입니다. 새 구역은 아래 조건 편집기에서 지정할 수 있습니다.",
+  congestionAware:"Dijkstra가 환경에서 주입한 추가 지연을 비용에 포함할지 정합니다.",
+  labelCap:"노드당 탐색 후보 수 상한입니다. 줄이면 계산 비용을 줄이는 대신 일부 경로 후보가 제외될 수 있습니다.",
+  routingQueueCapacity:"시간 모델에서 가용 버퍼를 비용으로 환산할 때 쓰는 기준입니다.",
+  hrJitterMs:"MCSR-HR의 지터 제약입니다. 낮추면 조건을 만족하는 후보가 줄어들 수 있습니다.",
+  tsDelayBoundMs:"MCSR-TS의 지연 제한입니다. -1은 제한을 두지 않습니다.",
+  jitterSource:"패킷 도착에서 측정한 변동과 궤도 변화로 인한 전파 지연 변동 중 하나를 비용에 사용합니다.",
+  jitterWindow:"오래된 지터 관측값을 비용 계산에서 제외하기까지의 시간입니다.",
+  refreshInterval:"MCSR 상태를 다시 계산하는 주기입니다. 0이면 별도의 시간 주기를 두지 않습니다.",
+  reserveDelay:"가정 모델에서 예비 경로 전환에 부과하는 시간입니다.",
+  repairDelay:"가정 모델에서 MCSR 경로 재계산에 부과하는 시간입니다.",
+  failureScopeHops:"시간 모델에서 장애 정보가 전달될 최대 홉 수입니다. 0은 홉 수 제한이 없습니다.",
+  flowTimeout:"패킷에 기록된 경로를 유지하는 시간입니다. 지나면 경로를 다시 확인합니다.",
+  reservedPaths:"장애 시 보관된 예비 경로를 시도합니다. 새 경로 계산 횟수와 첫 수신 복구를 비교하세요.",
+  snapshotOnDelayUpdate:"전파 지연이 바뀔 때 MCSR 상태를 다시 계산합니다. 경로 변화와 계산량에 영향을 줍니다.",
+  csibEnabled:"MCSR에서 지역 대표가 링크 상태를 수집하고 배포하는 방식을 사용합니다. 제어 전송량과 정보 수렴을 비교하세요.",
+  csibVote:"지역 대표를 정할 때 투표를 사용합니다.",
+  csibPeriod:"지역 상태를 수집하고 배포하는 주기입니다. 줄이면 정보를 더 자주 갱신합니다.",
+  csibMonitorInterval:"시간 모델에서 상태 변화를 추가로 확인하는 주기입니다. 0이면 추가 감시를 끕니다.",
+  csibComputeDelay:"가정 모델에서 CSIB 계산에 걸리는 시간입니다.",
+  csibReportProcDelay:"가정 모델에서 상태 보고를 처리하는 시간입니다.",
+  csibHopProcDelay:"가정 모델에서 CSIB를 다음 홉으로 전달할 때 부과하는 처리 시간입니다.",
+  csibMessageBytes:"CSIB 메시지에 가정하는 최소 크기입니다. 0이면 내용을 기준으로 자동 계산합니다.",
+  csibDetectDelay:"시간 모델에서 CSIB 장애 감지에 가정한 시간입니다. -1은 SLS 설정을 따릅니다.",
+  slsInterval:"이웃 위성의 상태를 확인하는 간격입니다. 짧게 하면 감지가 빨라질 수 있고 제어 전송이 늘어납니다.",
+  slsMissCount:"링크 장애로 판단하기까지 상태 메시지를 연속해서 놓친 횟수입니다.",
+  floodHopDelay:"장애 정보가 한 홉을 지나갈 때 부과하는 가정 지연입니다.",
+  spfDelay:"가정 모델에서 Dijkstra 경로 재계산에 부과하는 시간입니다.",
+  srdK:"SRD를 나눌 때 궤도면 방향 크기입니다. 0이면 자동으로 정합니다.",
+  srdL:"SRD를 나눌 때 같은 궤도면 안의 위성 방향 크기입니다. 0이면 자동으로 정합니다.",
+  processingMode:"가정값 적용을 선택하면 지정한 경로 전환·제어 처리 지연이 반영됩니다.",
+  controlMode:"실제 패킷은 제어 메시지의 전송·큐잉·손실을 계산합니다. 시간 가정은 설정된 지연으로 정보를 전달합니다.",
+  jitterModel:"실제 지연 변동은 패킷 도착에도 영향을 줍니다. 라우팅 비용 주입은 경로 평가에 반영합니다.",
+  floodModel:"MCSR의 기준 경로 계산 방식을 선택합니다. 방식을 바꾸면 탐색 비용이나 경로 후보가 달라질 수 있습니다.",
+  controlRefresh:"제어 상태를 다시 읽는 주기입니다. 짧게 하면 정보가 자주 갱신되고 전송이 늘 수 있습니다.",
+  controlTimeout:"지역 대표가 상태 보고를 기다리는 시간입니다.",
+  controlHeaderBytes:"제어 메시지 헤더에 가정하는 크기입니다. 제어 전송량에 반영합니다.",
+  controlRecordBytes:"링크 상태 레코드 하나의 크기입니다. 제어 전송량과 분할 횟수에 영향을 줍니다.",
+  controlMtu:"제어 프레임 하나의 최대 크기입니다. 작게 하면 같은 메시지가 더 많은 프레임으로 분할될 수 있습니다.",
+  controlReassemblyTimeout:"분할된 제어 메시지의 나머지 프레임을 기다리는 시간입니다.",
+  controlResyncInterval:"누락된 제어 상태를 다시 맞추는 주기입니다.",
+  routeRecording:"변경된 경로만 저장하면 CSV 크기를 줄일 수 있습니다. 모든 경로 모드는 각 계획 결과를 기록합니다.",
+  packetTrace:"개별 패킷의 상세 기록을 저장합니다. 장애 원인 추적에 쓸 수 있고 결과 크기가 커집니다.",
+  "entry-kind":"혼잡이나 장애를 적용할 대상의 종류입니다. 링크, 위성, 경로 구간 또는 지리 범위를 지정할 수 있습니다.",
+  "entry-start":"이 조건을 적용하기 시작하는 시각입니다.",
+  "entry-end":"이 조건을 해제하는 시각입니다. 빈값은 실행이 끝날 때까지 적용합니다.",
+  "entry-ramp":"설정한 혼잡 강도까지 효과를 점진적으로 높이는 시간입니다.",
+  "entry-rho":"환경 혼잡 강도입니다. 선택한 용량·버퍼·큐 효과에 사용합니다.",
+  "entry-fail":"선택한 연결을 조건 적용 구간 동안 끊습니다.",
+  "entry-use_capacity":"혼잡 강도에 따라 링크에서 사용 가능한 전송 용량을 줄입니다.",
+  "entry-use_buffer":"혼잡 강도에 따라 라우팅 비용에 들어가는 가용 버퍼를 줄입니다.",
+  "entry-use_queue":"모형에서 계산한 큐잉 지연을 추가합니다.",
+  "penalty-delay_ms":"지정한 링크에 추가할 지연입니다.",
+  "penalty-jitter_ms":"지정한 링크에 추가할 지연 변동입니다.",
+  "penalty-loss_pct":"지정한 링크에서 패킷이 손실될 확률입니다.",
+  "target-direction":"효과를 양방향 또는 지정한 전달 방향에 적용합니다.",
+  "target-link_rule":"링크 양 끝 중 몇 개가 대상에 포함돼야 효과를 적용할지 정합니다."
+};
+let helpSequence=0;
+function helpWidget(label,description){
+  const id=`help-${++helpSequence}`;
+  const button=node("button",{type:"button",class:"help-icon",title:description,"aria-label":label+" 도움말","aria-controls":id,"aria-expanded":"false"},"ⓘ");
+  const panel=node("div",{id,class:"help-popover",popover:"auto"},description);
+  button.onclick=()=>{
+    if(panel.matches(":popover-open")){panel.hidePopover();return;}
+    panel.showPopover();
+    const anchor=button.getBoundingClientRect(),size=panel.getBoundingClientRect();
+    panel.style.left=Math.max(8,Math.min(anchor.left,innerWidth-size.width-8))+"px";
+    panel.style.top=(anchor.bottom+size.height+12<=innerHeight?anchor.bottom+6:Math.max(8,anchor.top-size.height-6))+"px";
+  };
+  panel.addEventListener("toggle",e=>button.setAttribute("aria-expanded",String(e.newState==="open")));
+  const widget=node("span",{class:"help-widget"});widget.append(button,panel);return widget;
+}
+function attachSettingHelp(container){
+  for(const input of container.querySelectorAll("input[id],select[id]")){
+    const label=input.closest("label");
+    const description=settingHelp[input.id.replace(/^edit-/,"")]||(
+      input.id.startsWith("target-")?"효과를 적용할 대상 범위의 값입니다. 범위를 좁히면 지정한 위성이나 링크만 변경됩니다.":"");
+    if(!description||!label||label.parentElement.classList.contains("field-with-help"))continue;
+    const wrap=node("div",{class:"field-with-help"});
+    const title=(label.querySelector(":scope > span")?.textContent||label.textContent).trim();
+    label.before(wrap);wrap.append(label,helpWidget(title,description));
+  }
+}
+for(const [id,label,description] of [
+  ["scenarioHeading","시험 조건","기본 통신·부하·장애 시나리오로 시험 환경을 고릅니다. 알고리즘은 별도 목록에서 선택합니다. 조건 수정의 기본값은 선택한 구성의 제공 설정을 불러옵니다."],
+  ["mapSample","지도 재생","위성이나 연결에 마우스를 올리면 상세 정보를 볼 수 있습니다. 재생 막대로 시각을 이동하고, 참고 지도인지 실행 결과인지 상태 문구에서 확인하세요."],
+  ["csvInput","결과 파일 열기","실행 결과 열기는 manifest.json이 들어 있는 폴더를 선택합니다. CSV만 열기는 저장된 경로 표를 읽으며, 실행 당시 지도 정보는 결과 폴더가 있어야 재현할 수 있습니다."],
+  ["btnCompare","실행 비교","완료된 두 실행이나 반복 실험 이력을 비교합니다. 같은 조건에서 새 알고리즘을 시험하려면 위쪽의 비교 실행을 사용하세요."],
+  ["experimentConditions","반복 비교","선택한 알고리즘을 같은 시드와 순서별 공통 입력으로 실행합니다. 고정 입력의 반복은 환경 변화에 대한 신뢰구간을 표시하지 않습니다."]
+]){
+  const anchor=byId(id);(id==="csvInput"?anchor.closest("label"):anchor).after(helpWidget(label,description));
+}
+attachSettingHelp(byId("experimentDialog"));
 function control(label,id,value,type="number",options={}){
   const wrap=node("label",{class:"editor-field"});wrap.append(node("span",{},label));let e;
   if(type==="select"){e=node("select",{id});for(const [key,title]of Object.entries(options))e.add(new Option(title,key));e.value=String(value);}
@@ -32,7 +162,10 @@ function updateMcsrControls(){
   byId("settingsModelStatus").textContent=alternatives.length?"모델 검증 · "+alternatives.join(" · "):"";
   byId("settingsModelStatus").hidden=!alternatives.length;
 }
-function openSettings(cfg){
+function openSettings(cfg,resetDefaults=false){
+  nativeUI.resetDefaults=resetDefaults;
+  byId("settingsDefaultsStatus").textContent=resetDefaults?"기본값 미리 보기 · 저장해야 적용됩니다.":"";
+
   nativeUI.config=cfg;nativeUI.scenario=structuredClone(cfg.scenario||{schema:1,method:"environment",entries:[]});nativeUI.entryIndex=-1;
   const container=byId("settingsFields");container.replaceChildren();byId("settingsError").textContent="";
   const [basic,grid]=group("기본 설정",true);container.append(basic);
@@ -113,7 +246,7 @@ function openSettings(cfg){
   ag.append(models,recording);
   container.insertBefore(node("p",{id:"settingsModelStatus",class:"model-status",role:"status",hidden:true}),basic);
   for(const key of ["algorithm","processingMode","controlMode","jitterModel","csibEnabled","failureKnowledge","queueCapacity"])byId("edit-"+key).addEventListener("change",updateMcsrControls);
-  updateMcsrControls();byId("settingsDialog").showModal();
+  updateMcsrControls();attachSettingHelp(container);if(!byId("settingsDialog").open)byId("settingsDialog").showModal();
 }
 const cities={"서울":[37.5665,126.978],"도쿄":[35.6762,139.6503],"베이징":[39.9042,116.4074],"싱가포르":[1.3521,103.8198],"시드니":[-33.8688,151.2093],"뭄바이":[19.076,72.8777],"두바이":[25.2048,55.2708],"모스크바":[55.7558,37.6173],"런던":[51.5074,-.1278],"파리":[48.8566,2.3522],"프랑크푸르트":[50.1109,8.6821],"카이로":[30.0444,31.2357],"라고스":[6.5244,3.3792],"요하네스버그":[-26.2041,28.0473],"뉴욕":[40.7128,-74.006],"로스앤젤레스":[34.0522,-118.2437],"멕시코시티":[19.4326,-99.1332],"상파울루":[-23.5505,-46.6333],"부에노스아이레스":[-34.6037,-58.3816],"산티아고":[-33.4489,-70.6693]};
 function buildEntryForm(entry=null){
@@ -138,6 +271,7 @@ function buildEntryForm(entry=null){
     }
     area.append(control("방향","target-direction",params.direction||"both","select",k==="link"?{both:"양방향",out:"A → B",in:"B → A"}:{both:"양방향",out:"나가는 방향",in:"들어오는 방향"}));
     area.append(control("링크 적용","target-link_rule",params.link_rule||"any","select",{any:"한쪽 끝 포함",both:"양쪽 끝 포함"}));
+    attachSettingHelp(area);
   }
   byId("entry-kind").onchange=targetFields;targetFields();
   const time=node("div",{class:"editor-grid"});form.append(time);
@@ -148,7 +282,7 @@ function buildEntryForm(entry=null){
   const actions=node("div",{class:"entry-actions"});const add=node("button",{type:"button",class:"btn-primary"},nativeUI.entryIndex<0?"조건 추가":"조건 수정");
   add.onclick=()=>{try{const e=entryFromForm();if(nativeUI.entryIndex<0)nativeUI.scenario.entries.push(e);else nativeUI.scenario.entries[nativeUI.entryIndex]=e;nativeUI.entryIndex=-1;refreshEntries();buildEntryForm();byId("settingsError").textContent="";}catch(error){byId("settingsError").textContent=error.message;}};actions.append(add);
   const upload=node("label",{class:"file-btn"},"시나리오 가져오기"),file=node("input",{type:"file",accept:".json",hidden:true});upload.append(file);file.onchange=async()=>{try{const s=JSON.parse(await file.files[0].text());if(!Array.isArray(s.entries))throw Error("시나리오 형식을 확인하세요.");nativeUI.scenario=s;refreshEntries();}catch(e){byId("settingsError").textContent=e.message;}};
-  const download=node("button",{type:"button"},"시나리오 내보내기");download.onclick=()=>{const a=node("a",{href:URL.createObjectURL(new Blob([JSON.stringify(nativeUI.scenario,null,2)],{type:"application/json"})),download:"congestion_scenario.json"});a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};actions.append(upload,download);form.append(actions);
+  const download=node("button",{type:"button"},"시나리오 내보내기");download.onclick=()=>{const a=node("a",{href:URL.createObjectURL(new Blob([JSON.stringify(nativeUI.scenario,null,2)],{type:"application/json"})),download:"congestion_scenario.json"});a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};actions.append(upload,download);form.append(actions);attachSettingHelp(form);
 }
 function entryFromForm(){
   const k=value("entry-kind");const p={};for(const input of byId("entry-target").querySelectorAll("input[id^=target-],select[id^=target-]"))p[input.id.slice(7)]=input.type==="number"?Number(input.value):input.value;
@@ -163,11 +297,25 @@ function entryFromForm(){
 }
 function refreshEntries(){const list=byId("scenarioEntries");list.replaceChildren();nativeUI.scenario.entries.forEach((e,i)=>{const row=node("div",{class:"scenario-entry"});row.append(node("span",{},`${i+1}. ${e.target.kind} · ${e.start_s}s–${e.end_s??"끝"} · ${e.fail?"장애":`${Math.round(e.rho*100)}%`}`));const edit=node("button",{type:"button"},"편집"),remove=node("button",{type:"button"},"삭제");edit.onclick=()=>{nativeUI.entryIndex=i;buildEntryForm(e);};remove.onclick=()=>{nativeUI.scenario.entries.splice(i,1);nativeUI.entryIndex=-1;refreshEntries();};row.append(edit,remove);list.append(row);});}
 byId("btnSettings").onclick=async()=>{try{const r=await fetch(`/api/config?config=${encodeURIComponent(cfgNameSel.value)}`,{cache:"no-store"});const cfg=await r.json();if(!r.ok)throw Error(cfg.error);openSettings(cfg);}catch(e){setStatus(e.message);}};
+byId("settingsDefaults").onclick=async()=>{
+  const original=nativeUI.config,button=byId("settingsDefaults");
+  if(!original)return;
+  button.disabled=true;
+  const save=byId("settingsForm").querySelector("[type=submit]");save.disabled=true;
+  try{
+    const response=await fetch(`/api/config?config=${encodeURIComponent(original.activeConfig)}&defaults=1`,{cache:"no-store"});
+    const cfg=await response.json();
+    if(!response.ok)throw Error(cfg.error);
+    if(byId("settingsDialog").open&&nativeUI.config===original)openSettings(cfg,true);
+  }catch(e){if(nativeUI.config===original)byId("settingsError").textContent=e.message;}
+  finally{button.disabled=false;save.disabled=false;}
+};
 for(const button of document.querySelectorAll("[data-close]"))button.onclick=()=>byId(button.dataset.close).close();
 byId("settingsForm").onsubmit=async event=>{
   event.preventDefault();const save=event.submitter||byId("settingsForm").querySelector("[type=submit]");save.disabled=true;
   try {
     const cfg=nativeUI.config,first=cfg.stations.find(s=>s.enabled)||cfg.stations[0],changes={senders:[...document.querySelectorAll(".sender-check:checked")].map(e=>Number(e.value))};
+    if(changes.senders.join(",")===cfg.stations.filter(s=>s.enabled).map(s=>s.id).join(","))delete changes.senders;
     if(value("edit-algorithm")!==cfg.algorithm)changes.algorithm=value("edit-algorithm");
     for(const [key,original]of Object.entries({destination:first.dstStation,packetSize:first.packetSize,sendInterval:first.sendInterval,endTime:first.endTime,startTime:first.startTime})){if(value("edit-"+key)!==""&&numeric("edit-"+key)!==original)changes[key]=numeric("edit-"+key);}
     for(const f of cfg.capabilities.fields){const input=byId("edit-"+f.key);if(input&&!input.disabled)changes[f.key]=numeric("edit-"+f.key);}
@@ -179,7 +327,8 @@ byId("settingsForm").onsubmit=async event=>{
     for(const key of ["controlRefresh","controlTimeout","controlHeaderBytes","controlRecordBytes","controlMtu","controlReassemblyTimeout","controlResyncInterval"]){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=numeric("edit-"+key);}
     changes.packetTrace=byId("edit-packetTrace").checked;
     for(const key of Object.keys(changes))if(changes[key]===cfg[key])delete changes[key];
-    const response=await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfg.activeConfig,changes,scenario:nativeUI.scenario})});const result=await response.json();if(!response.ok)throw Error(result.error||"저장하지 못했습니다.");
+    const response=await fetch("/api/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfg.activeConfig,changes,resetDefaults:!!nativeUI.resetDefaults,
+      scenario:JSON.stringify(nativeUI.scenario)===JSON.stringify(cfg.scenario||{schema:1,method:"environment",entries:[]})?null:nativeUI.scenario})});const result=await response.json();if(!response.ok)throw Error(result.error||"저장하지 못했습니다.");
     applyLoadedConfig(result,{announce:true});byId("settingsDialog").close();setStatus("INI에 저장했습니다. 실행하면 새 설정이 적용됩니다.");
   }catch(e){byId("settingsError").textContent=e.message;}finally{save.disabled=false;}
 };

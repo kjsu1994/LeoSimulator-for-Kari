@@ -103,9 +103,28 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     assert(await evaluate("byId('algorithmChoice').value==='mcsr-ts' && !byId('algorithmChoice').disabled && runStatus.textContent==='save rejected'"));
     await evaluate("(async()=>{byId('algorithmChoice').value='dijkstra-delay';await byId('algorithmChoice').onchange({target:byId('algorithmChoice')});})()");
     console.log('Simple workflow passed: curated conditions, additional configurations, separate algorithm selection, persisted INI, unchanged traffic/result, save-error rollback and Korean INI search');
+    await evaluate("cfgNameSel.value='Dijkstra132PairFail';cfgNameSel.onchange()");
+    assert(await evaluate("byId('scenarioMeaning').textContent.includes('60·120·180초') && byId('scenarioMeaning').textContent.includes('30초간')"));
+    await evaluate("cfgNameSel.value='Dijkstra132RandomFail';cfgNameSel.onchange()");
+    assert(await evaluate("byId('scenarioMeaning').textContent.includes('장애 20건') && byId('scenarioMeaning').textContent.includes('장애 시드')"));
+    await evaluate(`(async()=>{
+      await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({configName:'Dijkstra132PairFail',changes:{sendInterval:.08}})});
+      openSettings(await fetch('/api/config?config=Dijkstra132PairFail').then(r=>r.json()));
+      await byId('settingsDefaults').onclick();
+    })()`);
+    assert(await evaluate("Number(byId('edit-sendInterval').value)===.02 && byId('settingsDefaultsStatus').textContent.includes('저장해야')"));
+    assert.equal(await evaluate("fetch('/api/config?config=Dijkstra132PairFail').then(r=>r.json()).then(c=>c.stations[0].sendInterval)"),.08);
+    await evaluate("byId('settingsDialog').close()");
+    await evaluate("(async()=>{openSettings(await fetch('/api/config?config=Dijkstra132PairFail').then(r=>r.json()));await byId('settingsDefaults').onclick();byId('settingsForm').requestSubmit(byId('settingsForm').querySelector('[type=submit]'));})()");
+    await retry(async()=>assert(await evaluate("!byId('settingsDialog').open")));
+    assert.equal(await evaluate("fetch('/api/config?config=Dijkstra132PairFail').then(r=>r.json()).then(c=>c.stations[0].sendInterval)"),.02);
     await evaluate("(async()=>{openSettings(await fetch('/api/config?config=PaperS1Mcsr').then(r=>r.json()))})()");
     assert.equal(await evaluate("document.querySelectorAll('.sender-check').length"),100);
     assert.equal(await evaluate("value('edit-algorithm')"),"mcsr-ls");
+    await evaluate("byId('edit-numSatellites').closest('.field-with-help').querySelector('button').click()");
+    assert(await evaluate("document.querySelector('.help-popover:popover-open').textContent.includes('전달률')"));
+    await evaluate("document.querySelector('.help-popover:popover-open').hidePopover()");
+
     assert.equal(await evaluate("byId('settingsAdvanced').open"),false);
     assert(await evaluate("byId('edit-hrJitterMs').disabled && byId('edit-tsDelayBoundMs').disabled"));
     await evaluate("byId('edit-algorithm').value='mcsr-hr';updateMcsrControls()");

@@ -103,3 +103,18 @@ dialog{color:#e4edf8;background:#151e2c;border:1px solid #40516a;border-radius:1
 .ini-label{display:block;color:#d6e5f6;font:500 12px/1.7 system-ui,sans-serif}
 
 .experiment-options{margin:0 20px 12px}.experiment-options>summary{cursor:pointer;color:#a9bdd5;font-size:13px}
+
+#scenarioMeaning{margin:0 0 5px;color:#b9cde2}
+#settingsDefaultsStatus{margin-right:auto}
+#settingsDefaults{margin-right:0}
+.help-widget{display:inline-flex;align-items:center;flex:none}
+.help-icon{font:inherit;font-size:15px;line-height:1;padding:3px 5px;min-width:25px;color:#9dddf5;border:1px solid transparent;background:transparent}
+.help-icon:hover,.help-icon[aria-expanded="true"]{background:#25415c;border-color:#4f728f}
+.help-popover{position:fixed;inset:auto;margin:0;max-width:min(330px,calc(100vw - 16px));box-sizing:border-box;padding:11px 14px;background:#1c2e43;color:#edf6ff;border:1px solid #5f84a7;border-radius:8px;box-shadow:0 6px 24px #0008;font:13px/1.55 system-ui,sans-serif;white-space:normal}
+.field-with-help{position:relative;min-width:0}
+.field-with-help:has(>label[hidden]){display:none}
+.field-with-help>.help-widget{position:absolute;right:0;top:0}
+.field-with-help>.editor-field>span,.field-with-help>.check-field{padding-right:28px}
+.field-with-help>.editor-field>span{min-height:22px}
+#experimentConditions+.help-widget{margin:0 0 8px 20px}
+.dialog-actions{flex-wrap:wrap}

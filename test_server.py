@@ -170,6 +170,29 @@ class DataTests(unittest.TestCase):
             self.assertEqual(read('Dijkstra132Hop')['algorithm'],'mcsr-ts')
             self.assertEqual(read('Dijkstra132')['algorithm'],'dijkstra-delay')
 
+    def test_defaults_preview_and_save_only_replace_selected_section(self):
+        import shutil
+        from config_editor import edit,preview_defaults
+        with tempfile.TemporaryDirectory() as tmp:
+            settings=Path(tmp)/'settings';shutil.copytree(Path(server.LEO_DIR),settings)
+            ini=settings/'simulations/Network/omnetpp.ini'
+            read=lambda name:server.read_ini_config(name,entry_path=str(ini))
+            edit(ini,'Dijkstra132',{'altitude':605},read)
+            edit(ini,'Dijkstra132PairFail',{'altitude':650,'senders':[0,1],'sendInterval':.08},read)
+            before=ini.read_bytes()
+            draft=preview_defaults(ini,'Dijkstra132PairFail')
+            self.assertEqual(draft['altitude'],605)
+            self.assertEqual([st['id'] for st in draft['stations'] if st['enabled']],[0])
+            self.assertEqual(draft['stations'][0]['sendInterval'],.02)
+            self.assertEqual(read('Dijkstra132PairFail')['altitude'],650)
+            self.assertEqual(ini.read_bytes(),before)
+            result=edit(ini,'Dijkstra132PairFail',{'simTimeLimit':320},read,reset=True)
+            self.assertEqual(result['altitude'],605)
+            self.assertEqual(result['simTimeLimit'],320)
+            self.assertEqual(result['stations'][0]['sendInterval'],.02)
+            self.assertEqual(read('Dijkstra132')['altitude'],605)
+            self.assertFalse(list(ini.parent.glob('.validate-*.ini')))
+
     def test_native_rejects_invalid_settings(self):
         from native_engine import configuration
         cfg=server.read_ini_config("Dijkstra132")

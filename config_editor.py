@@ -14,9 +14,49 @@ def render(value):
         return '"'+value+'"'
     return format(float(value),'.15g')
 
-def edit(path,config,changes,read_config,scenario=None):
+def section_bounds(lines,config):
+    start=None
+    for i,line in enumerate(lines):
+        match=re.match(r'\s*\[Config\s+([^\]]+)\]',line)
+        if not match:continue
+        if start is not None:return start,i
+        if match[1].strip()==config:start=i+1
+    if start is None:raise ValueError('선택한 구성의 기본값을 찾을 수 없습니다.')
+    return start,len(lines)
+
+def default_text(path,text,config):
+    defaults=path.with_suffix('.defaults')
+    if not defaults.is_file():raise ValueError('기본값 파일을 찾을 수 없습니다.')
+    lines=text.splitlines(keepends=True)
+    source=defaults.read_text(encoding='utf-8-sig').splitlines(keepends=True)
+    start,end=section_bounds(lines,config)
+    first,last=section_bounds(source,config)
+    newline='\r\n' if '\r\n' in text else '\n'
+    return ''.join(lines[:start]+[line.rstrip('\r\n')+newline for line in source[first:last]]+lines[end:])
+
+def read_preview(path,config,text):
+    from tempfile import NamedTemporaryFile
+    from server import read_ini_config
+    from run_manager import load_external_inputs
+    with NamedTemporaryFile(dir=path.parent,prefix='.validate-defaults-',suffix='.ini',delete=False) as temporary:
+        shadow=Path(temporary.name)
+        temporary.write(text.encode('utf8'))
+    try:
+        cfg=load_external_inputs(read_ini_config(config,entry_path=str(shadow)),path)
+        cfg['iniPath']=str(path)
+        return cfg
+    finally:
+        shadow.unlink(missing_ok=True)
+
+def preview_defaults(path,config):
+    path=Path(path)
+    return read_preview(path,config,default_text(path,path.read_bytes().decode('utf-8-sig'),config))
+
+def edit(path,config,changes,read_config,scenario=None,*,reset=False):
     path=Path(path);before=path.read_bytes();text=before.decode('utf-8-sig');newline='\r\n' if '\r\n' in text else '\n'
-    current=read_config(config);fields={f[0]:f for f in FIELDS};values={}
+    if reset:text=default_text(path,text,config)
+    current=read_preview(path,config,text) if reset else read_config(config)
+    fields={f[0]:f for f in FIELDS};values={}
     simple={'congestionMode':'*.native.congestionMode','routeRecording':'*.native.routeRecording','packetTrace':'*.native.packetTrace',
             'failureSchedule':'*.islFailures.schedule','failureReplay':'*.islFailures.replayFile','congestionZones':'*.congestion.zones',
             'randomFailures':'*.islFailures.randomFailures','randomStart':'*.islFailures.randomStart','randomEnd':'*.islFailures.randomEnd',
@@ -67,13 +107,8 @@ def edit(path,config,changes,read_config,scenario=None):
         target=path.parent/'scenarios'/name
         values['*.congestion.scenarioFile']=render('scenarios/'+name)
     elif 'scenarioFile' in changes:values['*.congestion.scenarioFile']=render(changes['scenarioFile'])
-    lines=text.splitlines(keepends=True);start=None;end=len(lines)
-    for i,line in enumerate(lines):
-        match=re.match(r'\s*\[Config\s+([^\]]+)\]',line)
-        if match:
-            if start is not None:end=i;break
-            if match[1].strip()==config:start=i+1
-    if start is None:raise ValueError('Configuration must be declared in the editable root INI')
+    lines=text.splitlines(keepends=True)
+    start,end=section_bounds(lines,config)
     remaining=dict(values);block=[]
     for line in lines[start:end]:
         m=re.match(r'(\s*)([^#=]+?)(\s*=\s*)(.*)',line)

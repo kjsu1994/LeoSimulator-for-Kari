@@ -509,7 +509,37 @@ document.getElementById("algorithmChoice").onchange=async event=>{
   finally{configSaving=false;controls.forEach((e,i)=>e.disabled=states[i]);}
 };
 
+function scenarioMeaning(cfg){
+  const notes=[];
+  const replay=cfg.failureReplayEvents?.length>0||!!cfg.failureReplay;
+  if(cfg.failureSchedule&&!replay){
+    const events=cfg.failureSchedule.split(/[;,\s]+/).map(item=>item.match(/^(route|\d+-\d+)@([0-9.eE+-]+?)(?:\+([0-9.eE-]+))?$/)).filter(Boolean);
+    if(events.length){
+      const targets=events.every(e=>e[1]==="route")?"기준 경로의 위성 간 링크를": "지정된 위성 간 링크를";
+      const timing=events.map(([,target,start,duration])=>`${target==="route"?"":target+"번 · "}${start}초부터 ${Number(duration)>0?duration+"초간":"종료까지"}`);
+      const commonDuration=events.every(e=>e[1]==="route"&&e[3]===events[0][3]);
+      const schedule=commonDuration?`${events.map(e=>e[2]).join("·")}초에 각각 ${Number(events[0][3])>0?events[0][3]+"초간":"종료까지"}`:timing.join(", ");
+      notes.push(`${targets} ${schedule} 끊어 우회 경로와 수신 재개를 확인합니다.`);
+    }else notes.push("등록한 일정에 따라 위성 간 링크를 끊고 우회 경로와 수신 재개를 확인합니다.");
+  }
+  if(cfg.randomFailures>0&&!replay)notes.push(`${cfg.randomStart}~${cfg.randomEnd}초 사이에 링크 장애 ${cfg.randomFailures}건을 무작위로 발생시킵니다. ${cfg.randomDuration>0?`각 장애는 ${cfg.randomDuration}초 뒤 해제됩니다.`:"설정한 자동 복구 시각이 없습니다."} 같은 장애 시드는 같은 일정을 만듭니다.`);
+  if(replay)notes.push("가져온 파일의 링크 장애 일정을 재현합니다.");
+  if(cfg.scenario?.failure_events?.length)notes.push("시나리오 파일에 등록한 장애 일정도 적용합니다.");
+  if(cfg.congestionMode==="environment")notes.push("설정한 외부 혼잡 효과를 적용해 전달률과 지연 변화를 확인합니다.");
+  if(notes.length)return notes.join(" ");
+  if(!cfg.activeConfig)return "";
+  const senders=cfg.stations?.filter(s=>s.enabled)||[];
+  if(senders.length===1&&senders[0].dstStation>=0){
+    const sender=senders[0],destination=cfg.stations.find(s=>s.id===sender.dstStation);
+    if(destination)return `${sender.name} → ${destination.name} 단일 흐름의 경로와 수신 결과를 확인합니다.`;
+  }
+  return senders.length?`${senders.length}개 송신 노드에서 발생하는 패킷의 경로·전달률·지연을 확인합니다.`:"";
+}
+
 function updateProfileBox(cfg, highlight) {
+  const meaning=document.getElementById("scenarioMeaning");
+  meaning.textContent=scenarioMeaning(cfg);
+  meaning.hidden=!meaning.textContent;
   document.getElementById("savedConfigName").textContent = scenarioName(cfg.activeConfig);
   const entries = cfg.effectiveEntries || [];
   const value = key => entries.find(e => e.k === key)?.v;

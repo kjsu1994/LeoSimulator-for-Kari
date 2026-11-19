@@ -241,6 +241,11 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
             cfg_name = qs.get("config", [None])[0]
             try:
                 from run_manager import load_external_inputs
+                if qs.get("defaults")==["1"]:
+                    from config_editor import preview_defaults
+                    from run_manager import CONFIG_LOCK
+                    with CONFIG_LOCK:
+                        return self.send_json(preview_defaults(INI_PATH,cfg_name))
                 return self.send_json(load_external_inputs(read_ini_config(cfg_name), INI_PATH))
             except (ValueError, OSError) as exc:
                 return self.send_json({"error": str(exc)}, 400)
@@ -290,7 +295,7 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
                 from config_editor import edit
                 from run_manager import CONFIG_LOCK
                 with CONFIG_LOCK:
-                    result=edit(INI_PATH,body.get("configName"),body.get("changes",{}),read_ini_config,body.get("scenario"))
+                    result=edit(INI_PATH,body.get("configName"),body.get("changes",{}),read_ini_config,body.get("scenario"),reset=body.get("resetDefaults") is True)
                 return self.send_json(result)
             except (ValueError,OSError,KeyError) as exc:
                 return self.send_json({"error":str(exc)},400)
