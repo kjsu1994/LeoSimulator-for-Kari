@@ -26,6 +26,27 @@ def runs(base):
         except (OSError,ValueError,KeyError):continue
     return out
 
+def run_metadata(base):
+    formats = {'florasat-csv-ini-v1', 'leo-native-replay-v2', 'leo-native-replay-v3', 'leo-native-replay-v4'}
+    results = []
+    for path in (Path(base)/'data/runs').glob('*/manifest.json'):
+        try:
+            manifest = json.loads(path.read_text(encoding='utf-8'))
+            run_id = manifest['runId']
+            if manifest['format'] not in formats or folder(base, run_id) != path.parent:
+                continue
+            algorithm = (manifest.get('algorithmSettings') or {}).get('algorithm')
+            if not algorithm and manifest['format'].startswith('leo-native-'):
+                summary = path.parent/'summary.json'
+                if summary.is_file():
+                    algorithm = json.loads(summary.read_text(encoding='utf-8')).get('algorithm')
+            results.append({'runId':run_id, 'configName':manifest['configName'],
+                            'createdAt':str(manifest.get('createdAt') or ''), 'algorithm':algorithm})
+        except (OSError, ValueError, TypeError, AttributeError, KeyError):
+            continue
+    return sorted(results, key=lambda row: (row['createdAt'], row['runId']), reverse=True)
+
+
 def compare_bundles(a,b):
     def load(bundle):
         m=bundle['manifest'];f=bundle['files']

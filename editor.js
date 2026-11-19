@@ -126,11 +126,11 @@ function attachSettingHelp(container){
 for(const [id,label,description] of [
   ["scenarioHeading","시험 조건","기본 통신·부하·장애 시나리오로 시험 환경을 고릅니다. 알고리즘은 별도 목록에서 선택합니다. 조건 수정의 기본값은 선택한 구성의 제공 설정을 불러옵니다."],
   ["mapSample","지도 재생","위성이나 연결에 마우스를 올리면 상세 정보를 볼 수 있습니다. 재생 막대로 시각을 이동하고, 참고 지도인지 실행 결과인지 상태 문구에서 확인하세요."],
-  ["csvInput","결과 파일 열기","실행 결과 열기는 manifest.json이 들어 있는 폴더를 선택합니다. CSV만 열기는 저장된 경로 표를 읽으며, 실행 당시 지도 정보는 결과 폴더가 있어야 재현할 수 있습니다."],
+  ["btnOpenResult","실행 결과 열기","보관 목록에서 결과를 찾거나 manifest.json이 들어 있는 외부 결과 폴더를 선택합니다."],
   ["btnCompare","실행 비교","완료된 두 실행이나 반복 실험 이력을 비교합니다. 같은 조건에서 새 알고리즘을 시험하려면 위쪽의 비교 실행을 사용하세요."],
   ["experimentConditions","반복 비교","선택한 알고리즘을 같은 시드와 순서별 공통 입력으로 실행합니다. 고정 입력의 반복은 환경 변화에 대한 신뢰구간을 표시하지 않습니다."]
 ]){
-  const anchor=byId(id);(id==="csvInput"?anchor.closest("label"):anchor).after(helpWidget(label,description));
+  byId(id).after(helpWidget(label,description));
 }
 attachSettingHelp(byId("experimentDialog"));
 function control(label,id,value,type="number",options={}){
@@ -378,7 +378,7 @@ function drawMetrics(){
   byId("chartCaption").textContent=`${byId("metricSeries").selectedOptions[0].textContent} · ${byId("metricFlow").selectedOptions[0].textContent}`;
 }
 byId("metricSeries").onchange=drawMetrics;byId("metricFlow").onchange=drawMetrics;
-window.addEventListener("sim-result",e=>showMetrics(e.detail));window.addEventListener("sim-clear",()=>showMetrics(null));window.addEventListener("sim-csv",e=>showMetrics(e.detail.matchesMap?resultMeta:null));
+window.addEventListener("sim-result",e=>showMetrics(e.detail));window.addEventListener("sim-clear",()=>showMetrics(null));
 const comparisonInputs={};
 function showComparison(a,b){
   byId("singleComparisonControls").hidden=false;

@@ -221,8 +221,9 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
 
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/runs":
-            from comparison import runs
-            return self.send_json(runs(BASE_DIR))
+            from comparison import runs, run_metadata
+            query = urllib.parse.parse_qs(parsed.query)
+            return self.send_json(run_metadata(BASE_DIR) if query.get("metadata") == ["1"] else runs(BASE_DIR))
         if parsed.path.startswith("/api/run/"):
             from run_manager import state
             try:

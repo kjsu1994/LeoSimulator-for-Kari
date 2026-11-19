@@ -13,6 +13,26 @@ HEADER = "time,route,source,station,firstSat,exitSat,satHops,uplinkMs,satToStati
 ROW = "1.2,1,GS0,2,3,4,1,2.5,3.5,6,3-4\n"
 
 class DataTests(unittest.TestCase):
+    def test_result_catalog_uses_metadata_and_retains_legacy_results(self):
+        from comparison import run_metadata
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)/'data/runs'
+            for run_id, version, date in [('old-result', 'florasat-csv-ini-v1', '2026-11-18T00:00:00Z'),
+                                          ('new-result', 'leo-native-replay-v4', '2026-11-19T00:00:00Z')]:
+                folder = root/run_id
+                folder.mkdir(parents=True)
+                manifest = {'format': version, 'runId': run_id, 'configName': 'Dijkstra132', 'createdAt': date}
+                if run_id == 'new-result':
+                    manifest['algorithmSettings'] = {'algorithm': 'mcsr-hr'}
+                (folder/'manifest.json').write_text(json.dumps(manifest), encoding='utf8')
+            (root/'new-result'/'summary.json').write_text('never read', encoding='utf8')
+            (root/'broken-result').mkdir()
+            (root/'broken-result'/'manifest.json').write_text('{', encoding='utf8')
+            rows = run_metadata(temp)
+            self.assertEqual([row['runId'] for row in rows], ['new-result', 'old-result'])
+            self.assertEqual([row['algorithm'] for row in rows], ['mcsr-hr', None])
+            self.assertTrue(all('summary' not in row for row in rows))
+
     def test_all_existing_csv_fields_survive(self):
         raw = Path(server.BASE_DIR, "testdata/bundle/routes.csv").read_text()
         rows = list(csv.DictReader(io.StringIO(raw)))

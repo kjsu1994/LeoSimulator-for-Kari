@@ -11,7 +11,7 @@ earthImg.src = "data/earth.png";
 earthImg.onload = () => render();
 
 let routes = []; // Legacy files have no matching configuration/state evidence.
-let states = [], resultMeta = null, loadedConfigKey = "", csvMapTime = null;
+let states = [], resultMeta = null, loadedConfigKey = "";
 let resultLoadRequest = 0, previewConfig = null;
 function stateAt(t) {
   if (resultMeta?.replay) {const state=replaySnapshot(t);return resultMeta.networkEvents?.length?applyNetworkTimeline(state,resultMeta.networkEvents,resultMeta.runId,t):state;}
@@ -22,10 +22,8 @@ function stateAt(t) {
 }
 function clearResult() {
   window.dispatchEvent(new Event("sim-clear"));
-  routes = []; states = []; resultMeta = null; selectedRouteId = null; simTime = 0; csvMapTime = null;
-  document.getElementById("csvSource").textContent = "";
+  routes = []; states = []; resultMeta = null; selectedRouteId = null; simTime = 0;
   playing = false; document.getElementById("btnPlay").textContent = "Play";
-  document.getElementById("resultFiles").hidden = true;
 }
 function installResult(result) {
   clearResult();
@@ -34,10 +32,6 @@ function installResult(result) {
   applyLoadedConfig(result.config, { result: true });
   syncTimeBounds(result.replay ? result.config.simTimeLimit : (states.length ? states[states.length - 1].t : 0));
   setStatus(`${scenarioName(result.config.activeConfig)} · ${algorithmName(result.config)} 실행 결과를 불러왔습니다.`);
-  const download = document.getElementById("resultFiles");
-  download.hidden = false;
-  download.href = `data/runs/${result.runId}/${result.replay ? "routes.csv" : "results/routes.csv"}`;
-  download.textContent = `CSV | run ${result.runId} | SHA-256 ${result.csvHash.slice(0, 16)}`;
   render();
   window.dispatchEvent(new CustomEvent("sim-result",{detail:result}));
 }
@@ -160,6 +154,10 @@ function recentRoutes(data, time, limit) {
   return found;
 }
 
+function playbackTime(time) {
+  return time.toFixed(Math.min(5, Math.max(1, Math.ceil(-Math.log10(speed)))));
+}
+
 function render() {
   ctx.fillStyle = "#0d2240";
   ctx.fillRect(0, 0, W, H);
@@ -175,7 +173,7 @@ function render() {
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
   }
 
-  const mapTime = csvMapTime ?? simTime;
+  const mapTime = simTime;
   const snapshot = stateAt(mapTime);
   const sats = snapshot ? snapshot.nodes.slice(0, snapshot.numSats).map((p, idx) => ({ idx, lat: p[0], lon: p[1], alt: p[2] })) : [];
   const stStates = snapshot ? snapshot.nodes.slice(snapshot.numSats, snapshot.numSats + snapshot.numStations).map((p, id) => {
@@ -206,7 +204,7 @@ function render() {
   const maxRoutes = Math.max(0, ORBIT_CFG.maxRoutes);
   const endIdx = upperBoundTime(simTime);
   const windowRoutes = recentRoutes(routes, simTime, 40);
-  const drawnRoutes = (csvMapTime === null ? windowRoutes.slice(0, maxRoutes) : recentRoutes(resultMeta?.routes || [], mapTime, maxRoutes)).reverse();
+  const drawnRoutes = windowRoutes.slice(0, maxRoutes).reverse();
   const activeSatSet = new Set();
 
   if (snapshot && document.getElementById("chkRoutes").checked) {
@@ -216,9 +214,9 @@ function render() {
       const dstSt = stStates.find(s => s.id === dstId);
       if (!srcSt || !dstSt || path.some(id => !sats[id])) return;
       const age = Math.max(0, mapTime - t);
-      const alpha = csvMapTime === null && selectedRouteId === rId ? 1.0 : Math.max(0.15, 1.0 - age / routeLifetime);
+      const alpha = selectedRouteId === rId ? 1.0 : Math.max(0.15, 1.0 - age / routeLifetime);
       const color = ROUTE_COLORS[idx % ROUTE_COLORS.length];
-      const width = csvMapTime === null && selectedRouteId === rId ? 6 : 4;
+      const width = selectedRouteId === rId ? 6 : 4;
       const pts = [[srcSt.lon, srcSt.lat]];
       path.forEach(satIdx => {
         if (sats[satIdx]) {
@@ -296,14 +294,14 @@ function render() {
   const avgMs = endIdx ? (sumMs / endIdx).toFixed(1) : "0.0";
   const avgHops = endIdx ? (sumHops / endIdx).toFixed(1) : "0.0";
 
-  document.getElementById("mapTime").textContent = `${mapTime.toFixed(1)} s`;
+  document.getElementById("mapTime").textContent = `${playbackTime(mapTime)} s`;
   document.getElementById("mapSatellites").textContent = snapshot ? `${sats.length.toLocaleString("ko-KR")}기` : "—";
   document.getElementById("mapIsl").textContent = snapshot ? `${islCount.toLocaleString("ko-KR")}개` : "—";
   document.getElementById("mapGroundLinks").textContent = snapshot ? `${gslLinks.length.toLocaleString("ko-KR")}개` : "—";
   document.getElementById("mapRouting").textContent = `${scenarioName(resultMeta?.config.activeConfig || previewConfig?.activeConfig || "CSV")} · ${algorithmName(resultMeta?.config||previewConfig)}${resultMeta?.summary?.experimental?" · 환경/실험 설정":""}`;
-  document.getElementById("mapSample").textContent = snapshot && !resultMeta ? "설정 미리보기 · 실행 결과와 별도" : snapshot ? (snapshot.reconstructed && csvMapTime === null ? "설정 기반 재현 · 기록된 경로" : csvMapTime === null ? `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation` : `참고 지도 · ${scenarioName(resultMeta.config.activeConfig)} · ${snapshot.t.toFixed(3)} s · 선택 CSV와 별도`) : "No engine state for this data";
+  document.getElementById("mapSample").textContent = snapshot && !resultMeta ? "설정 미리보기 · 실행 결과와 별도" : snapshot ? (snapshot.reconstructed ? "설정 기반 재현 · 기록된 경로" : `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation`) : "No engine state for this data";
 
-  document.getElementById("timeLabel").textContent = `t = ${simTime.toFixed(1)} s`;
+  document.getElementById("timeLabel").textContent = `t = ${playbackTime(simTime)} s`;
   document.getElementById("timeSlider").value = simTime;
   document.getElementById("kpiSat").textContent = snapshot ? `${sats.length} / ${islCount}` : "N/A";
   document.getElementById("kpiGslLabel").textContent = "설정 기반 연결";
@@ -320,7 +318,7 @@ function render() {
     const dstTag = (dstSt && dstSt.mobile) ? `M${dstId}` : `GS${dstId}`;
     const sel = selectedRouteId === rId ? " class='selected'" : "";
     return `<tr data-id="${rId}" data-t="${t}"${sel}>
-      <td>${t.toFixed(1)}s</td>
+      <td>${playbackTime(t)}s</td>
       <td>${srcTag}→${dstTag}</td>
       <td>${hops}</td>
       <td title="First satellite: ${r[8]}; exit satellite: ${r[9]}; uplink: ${r[10]} ms; satellite-to-station: ${r[11]} ms; total: ${ms} ms">${ms.toFixed(1)}ms</td>
@@ -349,7 +347,79 @@ document.getElementById("btnStepBack").onclick = () => { simTime = Math.max(0, s
 document.getElementById("btnStepFwd").onclick = () => { simTime = Math.min(maxSimTime, simTime + 1); render(); };
 document.getElementById("btnSnap").onclick = () => { simTime = Math.min(maxSimTime, 1210); selectedRouteId = null; render(); };
 document.getElementById("timeSlider").oninput = e => { simTime = parseFloat(e.target.value); render(); };
-document.getElementById("speedSel").onchange = e => { speed = parseFloat(e.target.value); };
+const speedSelect = document.getElementById("speedSel");
+const speedCustom = document.getElementById("speedCustom");
+const speedInput = document.getElementById("speedInput");
+const speedError = document.getElementById("speedError");
+speedSelect.onchange = () => {
+  speedCustom.hidden = speedSelect.value !== "custom";
+  speedError.hidden = true;
+  speedInput.removeAttribute("aria-invalid");
+  if (speedCustom.hidden) { speed = Number(speedSelect.value); render(); }
+  else { speedInput.value = String(speed); speedInput.focus(); speedInput.select(); }
+};
+function applyCustomSpeed() {
+  const text = speedInput.value.trim().replace(",", ".");
+  const next = Number(text);
+  const valid = /^(?:\d+(?:\.\d+)?|\.\d+)$/.test(text) && next >= 0.00001 && next <= 60;
+  speedError.hidden = valid;
+  if (!valid) { speedInput.setAttribute("aria-invalid", "true"); return; }
+  speedInput.removeAttribute("aria-invalid");
+  speed = next;
+  speedInput.value = String(speed);
+  render();
+}
+speedInput.onchange = applyCustomSpeed;
+speedInput.onkeydown = event => {
+  if (event.key === "Enter") applyCustomSpeed();
+  if (event.key === "Escape") { speedInput.value = String(speed); applyCustomSpeed(); }
+};
+
+const mapFocusButton = document.getElementById("btnMapFocus");
+const sidePanel = document.getElementById("sidePanel");
+mapFocusButton.onclick = () => {
+  sidePanel.hidden = !sidePanel.hidden;
+  mapFocusButton.setAttribute("aria-expanded", String(!sidePanel.hidden));
+  mapFocusButton.textContent = sidePanel.hidden ? "패널 열기" : "지도 크게 보기";
+  tooltip.hidden = true;
+  render();
+};
+const panelDivider = document.getElementById("panelDivider");
+const mapLayout = panelDivider.parentElement;
+function panelWidthLimits() {
+  return [300, Math.min(850, Math.floor(mapLayout.clientWidth - 368))];
+}
+function describePanelWidth() {
+  if (!panelDivider.checkVisibility()) return;
+  const [min, max] = panelWidthLimits();
+  panelDivider.setAttribute("aria-valuemin", min);
+  panelDivider.setAttribute("aria-valuemax", max);
+  panelDivider.setAttribute("aria-valuenow", Math.round(sidePanel.getBoundingClientRect().width));
+}
+function resizePanel(value) {
+  const [min, max] = panelWidthLimits();
+  mapLayout.style.setProperty("--panel-width", Math.min(max, Math.max(min, value)) + "px");
+  tooltip.hidden = true;
+  describePanelWidth();
+}
+panelDivider.onpointerdown = event => {
+  if (event.button !== 0) return;
+  panelDivider.focus();
+  panelDivider.setPointerCapture(event.pointerId);
+};
+panelDivider.onpointermove = event => {
+  if (panelDivider.hasPointerCapture(event.pointerId)) resizePanel(mapLayout.getBoundingClientRect().right - event.clientX);
+};
+panelDivider.onkeydown = event => {
+  const [min, max] = panelWidthLimits();
+  const width = sidePanel.getBoundingClientRect().width;
+  const choices = {ArrowLeft: width + 24, ArrowRight: width - 24, Home: min, End: max};
+  if (!Object.hasOwn(choices, event.key)) return;
+  event.preventDefault();
+  resizePanel(choices[event.key]);
+};
+new ResizeObserver(describePanelWidth).observe(sidePanel);
+
 ["chkIsl", "chkGsl", "chkFoot", "chkRoutes", "chkLabels", "srcFilter", "dstFilter"].forEach(id => {
   document.getElementById(id).onchange = () => render();
 });
@@ -386,7 +456,7 @@ canvas.onmousemove = e => {
       }
     }
   }
-  if (hit && resultMeta?.networkEvents?.length) {const state=stateAt(csvMapTime??simTime);for(const s of lastSatStates)if(Math.hypot(lonToX(s.lon)-mx,latToY(s.lat)-my)<10){const info=state.knowledge?.get(s.idx);if(info)hit+=`\nCSIB v${info.version} · 정보 시각 ${info.dataTime.toFixed(3)}s`;break;}}
+  if (hit && resultMeta?.networkEvents?.length) {const state=stateAt(simTime);for(const s of lastSatStates)if(Math.hypot(lonToX(s.lon)-mx,latToY(s.lat)-my)<10){const info=state.knowledge?.get(s.idx);if(info)hit+=`\nCSIB v${info.version} · 정보 시각 ${info.dataTime.toFixed(3)}s`;break;}}
   if (hit) {
     const wrap = canvas.parentElement.getBoundingClientRect();
     tooltip.hidden = false;
@@ -399,41 +469,12 @@ canvas.onmousemove = e => {
 };
 canvas.onmouseleave = () => { tooltip.hidden = true; };
 
-// Custom CSV Loader
-document.getElementById("csvInput").onchange = e => {
-  const file = e.target.files[0];
-  if (!file) return;
-  e.target.value = "";
-  const request = ++resultLoadRequest;
-  (async()=>{
-    try {
-      let parsed;
-      if(resultMeta&&file.size>4*1024*1024){setStatus("CSV 확인 중…");const digest=await crypto.subtle.digest("SHA-256",await file.arrayBuffer());const hash=[...new Uint8Array(digest)].map(n=>n.toString(16).padStart(2,"0")).join("");if(hash===resultMeta.csvHash)parsed=resultMeta.routes;}
-      parsed=parsed||await parseRoutesBlob(file,()=>{},p=>{if(request!==resultLoadRequest)throw Error("결과 선택이 변경되었습니다.");setStatus(`CSV 읽는 중 ${Math.round(p*100)}%`);});
-      if(request!==resultLoadRequest)return;
-
-      const matchesMap = !!resultMeta && sameRoutes(parsed,resultMeta.routes);
-      // CSV has no coordinates: retain unmatched engine state as a labelled reference, never attach foreign paths.
-      csvMapTime = matchesMap ? null : (csvMapTime ?? simTime);
-      routes = parsed;
-      selectedRouteId = null;
-      playing = false;
-      document.getElementById("btnPlay").textContent = "Play";
-      simTime = routes.length ? Math.min(Math.max(simTime, routes[0][0]), routes[routes.length - 1][0]) : 0;
-      syncTimeBounds(matchesMap ? (resultMeta.replay ? resultMeta.config.simTimeLimit : states[states.length - 1].t) : (routes.length ? routes[routes.length - 1][0] : 0));
-      document.getElementById("csvSource").textContent = `선택 CSV: ${file.name} · ${routes.length.toLocaleString("ko-KR")}개 계획 경로`;
-      window.dispatchEvent(new CustomEvent("sim-csv",{detail:{matchesMap}}));
-      setStatus(matchesMap ? "선택한 CSV가 저장된 실행 결과와 일치합니다. 지도와 경로를 함께 재생합니다." : "선택한 CSV의 경로 표와 통계를 재생합니다. 위치 정보가 없어 지도는 기존 실행의 참고 화면으로 유지합니다.");
-    } catch(err){if(request===resultLoadRequest)setStatus(`CSV error: ${err.message}`);}
-    if(request===resultLoadRequest)render();
-  })();
-};
-
 // ---- Local Backend API Integration (server.py) ----
 const runStatus = document.getElementById("runStatus");
 function setStatus(msg) {
   runStatus.hidden = !msg;
   runStatus.textContent = msg;
+  if (!runActivity.classList.contains("running")) showRunActivity(msg);
 }
 
 const escHtml = s => String(s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
@@ -606,7 +647,7 @@ function applyLoadedConfig(cfg, opts = {}) {
   if(!resultMeta)previewConfig=cfg;
   updateOrbitConfig({ ...cfg, minEl: cfg.minimumElevation });
   if (Array.isArray(cfg.stations) || Array.isArray(cfg.terminals)) populateFilters();
-  if (cfg.simTimeLimit && csvMapTime === null) syncTimeBounds(cfg.simTimeLimit);
+  if (cfg.simTimeLimit) syncTimeBounds(cfg.simTimeLimit);
   }
 
   const active = resultMeta?.config.activeConfig || cfg.activeConfig || cfgNameSel.value;
@@ -664,30 +705,64 @@ document.getElementById("btnOpenIni").onclick = async () => {
 };
 
 let activeJob=null;
+const runActivity = document.getElementById("runActivity");
+const runActivityText = document.getElementById("runActivityText");
+const runActivityDetail = document.getElementById("runActivityDetail");
+const runProgress = document.getElementById("runProgress");
+
+function showRunActivity(text, detail="", progress=null) {
+  runActivity.hidden = !text;
+  if (runActivityText.textContent !== text) runActivityText.textContent = text;
+  runActivityDetail.textContent = detail;
+  runProgress.hidden = progress === null;
+  if (progress !== null) runProgress.value = progress;
+}
 async function runNative(algorithms=null,research=null) {
+  if(runActivity.classList.contains("running"))return;
   if(configSaving||configLoading)return setStatus("설정을 반영하고 있습니다. 잠시 후 실행하세요.");
   if(!location.protocol.startsWith("http"))return setStatus("새 계산은 sim-ui.exe에서 실행하세요.");
-  const btn=document.getElementById("btnRunSim"),compare=document.getElementById("btnExperiment"),stop=document.getElementById("btnStopSim");btn.disabled=true;compare.disabled=true;stop.hidden=false;
+  const btn=document.getElementById("btnRunSim"),compare=document.getElementById("btnExperiment"),stop=document.getElementById("btnStopSim");btn.disabled=true;compare.disabled=true;stop.hidden=false;stop.disabled=true;
+  runActivity.classList.add("running");
+  const operation = algorithms ? "비교 실행" : "실행";
+  showRunActivity(operation + " 준비 중…");
   const settingsControls=["cfgName","algorithmChoice","btnSettings","btnOpenIni","btnRefreshIni","showAllConfigs"].map(id=>document.getElementById(id)),settingsStates=settingsControls.map(e=>e.disabled);settingsControls.forEach(e=>e.disabled=true);
   try {
     let response=await fetch(algorithms?"/api/experiments":"/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfgNameSel.value,...(algorithms?{algorithms,research}:{})})});
     let data=await response.json();if(!response.ok)throw Error(data.error||"실행하지 못했습니다.");
     activeJob=data.runId;
+    stop.disabled=false;
     for(;;){
       await new Promise(resolve=>setTimeout(resolve,500));
       const job=await fetch(`/api/run/${activeJob}`,{cache:"no-store"}).then(r=>r.json());
       if(job.error&&job.status!=="cancelled")throw Error(job.error);
-      if(job.status==="completed"){if(algorithms){const latest=job.completedRuns.at(-1);const result=await fetch(`/api/result?runId=${encodeURIComponent(latest.runId)}&metadata=1`).then(r=>r.json());await openResultBundle(result.bundle);if(job.statistics)showExperimentStatistics(job.statistics);else document.getElementById("btnCompare").click();setStatus(`비교 실행 완료 · ${job.completedRuns.length}개`);}else{const result=await fetch(`/api/result?runId=${encodeURIComponent(job.runId)}&metadata=1`).then(r=>r.json());await openResultBundle(result.bundle);setStatus(`계산 완료 · ${job.runId}`);}break;}
+      if(job.status==="completed"){stop.disabled=true;showRunActivity("결과 불러오는 중…");if(algorithms){const latest=job.completedRuns.at(-1);const result=await fetch(`/api/result?runId=${encodeURIComponent(latest.runId)}&metadata=1`).then(r=>r.json());await openResultBundle(result.bundle);if(job.statistics)showExperimentStatistics(job.statistics);else document.getElementById("btnCompare").click();setStatus(`비교 실행 완료 · ${job.completedRuns.length}개`);}else{const result=await fetch(`/api/result?runId=${encodeURIComponent(job.runId)}&metadata=1`).then(r=>r.json());await openResultBundle(result.bundle);setStatus(`계산 완료 · ${job.runId}`);}break;}
       if(job.status==="cancelled"){setStatus("계산을 중지했습니다. 이전 결과를 유지합니다.");break;}
       if(job.status==="failed")throw Error(job.error||"계산 실패");
-      const p=job.progress;setStatus(p?`계산 중 ${job.completedRuns?.length||0} / ${job.totalRuns||1} · ${Math.round(p.progress*100)}% · ${p.time.toFixed(1)} / ${p.limit}s · 수신 ${p.received.toLocaleString()}`:"계산 준비 중…");
-      const progress=document.getElementById("runProgress");progress.hidden=false;progress.value=p?((job.completedRuns?.length||0)+p.progress)/(job.totalRuns||1):0;
+      if (job.status === "stopping") { showRunActivity("계산을 중지하는 중…"); continue; }
+      const completed = job.completedRuns?.length || 0;
+      const total = job.totalRuns || 1;
+      const p = job.completedRuns?.some(r => r.runId === job.currentRunId) ? null : job.progress;
+      const fraction = p ? (completed + p.progress) / total : null;
+      const detail = [algorithms ? "완료 " + completed + " / " + total : "", fraction !== null ? Math.round(fraction * 100) + "%" : ""].filter(Boolean).join(" · ");
+      showRunActivity(operation + (p ? " 계산 중…" : " 준비 중…"), detail, fraction);
+      setStatus(p?`계산 중 ${job.completedRuns?.length||0} / ${job.totalRuns||1} · ${Math.round(p.progress*100)}% · ${p.time.toFixed(1)} / ${p.limit}s · 수신 ${p.received.toLocaleString()}`:"계산 준비 중…");
     }
   }catch(error){setStatus(`실행 오류: ${error.message}`);}
-  finally {settingsControls.forEach((e,i)=>e.disabled=settingsStates[i]);activeJob=null;btn.disabled=false;compare.disabled=false;stop.hidden=true;document.getElementById("runProgress").hidden=true;}
+  finally {settingsControls.forEach((e,i)=>e.disabled=settingsStates[i]);activeJob=null;btn.disabled=false;compare.disabled=false;stop.hidden=true;runActivity.classList.remove("running");showRunActivity(runStatus.textContent);}
 }
 document.getElementById("btnRunSim").onclick=()=>runNative();
-document.getElementById("btnStopSim").onclick=async()=>{if(activeJob){await fetch(`/api/run/${activeJob}/cancel`,{method:"POST"});setStatus("계산을 중지하는 중…");}};
+document.getElementById("btnStopSim").onclick = async event => {
+  if (!activeJob) return;
+  const id = activeJob, button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const response = await fetch("/api/run/" + id + "/cancel", {method:"POST"});
+    if (!response.ok) throw Error("중지 요청을 처리하지 못했습니다.");
+    if (activeJob === id && runActivityText.textContent !== "결과 불러오는 중…") showRunActivity("계산을 중지하는 중…");
+  } catch (error) {
+    if (activeJob === id) { setStatus(error.message); button.disabled = false; showRunActivity(error.message); }
+  }
+};
 
 render();
 
@@ -719,10 +794,78 @@ async function openResultBundle(bundle, request = ++resultLoadRequest) {
     if (trial.nodes.some(p => !p.every(Number.isFinite))) throw new Error("설정으로 위치를 계산할 수 없습니다.");
   } catch (err) { updateOrbitConfig(previous); throw err; }
   installResult(prepared);
-  document.getElementById("csvSource").textContent = `실행 ID: ${prepared.runId} · CSV ${prepared.routes.length.toLocaleString("ko-KR")}개 · 설정 포함`;
-  setStatus(prepared.notice || (bundle.manifest.provenance === "manual-import-unverified" ? "가져온 CSV·INI로 지도를 재현합니다. 수동 등록 자료이므로 실행 당시 설정인지 확인해 주세요." : "실행 당시 보관한 CSV·INI로 지도를 재현합니다."));
+  if (prepared.notice) setStatus(prepared.notice);
+  else if (bundle.manifest.provenance === "manual-import-unverified") setStatus("수동 등록 자료이므로 실행 당시 설정인지 확인해 주세요.");
 }
-document.getElementById("resultFolder").onchange = async e => {
+const resultPicker = document.getElementById("resultDialog");
+const resultList = document.getElementById("savedRuns");
+const resultSearch = document.getElementById("resultSearch");
+const resultMessage = document.getElementById("resultMessage");
+const replayResultButton = document.getElementById("btnReplayResult");
+const resultFolderInput = document.getElementById("resultFolder");
+let savedResults = [];
+let listRequest = 0;
+
+function updateSavedSelection() {
+  document.getElementById("savedRunId").textContent = resultList.value;
+  replayResultButton.disabled = !resultList.value;
+}
+resultList.onchange = updateSavedSelection;
+resultSearch.oninput = () => {
+  const terms = resultSearch.value.toLowerCase().trim().split(/\s+/);
+  resultList.replaceChildren();
+  for (const row of savedResults) {
+    if (terms.every(term => row.search.includes(term))) resultList.add(new Option(row.label, row.runId));
+  }
+  resultList.selectedIndex = resultList.length ? 0 : -1;
+  resultMessage.textContent = resultList.length ? "" : "표시할 실행 결과가 없습니다.";
+  updateSavedSelection();
+};
+document.getElementById("btnOpenResult").onclick = async () => {
+  if (location.protocol === "file:") { resultFolderInput.click(); return; }
+  const request = ++listRequest;
+  savedResults = [];
+  resultSearch.value = "";
+  resultSearch.oninput();
+  resultSearch.disabled = true;
+  resultMessage.textContent = "저장된 결과를 찾는 중…";
+  resultPicker.showModal();
+  try {
+    const response = await fetch("/api/runs?metadata=1", {cache:"no-store"});
+    if (!response.ok) throw Error("보관 목록을 불러오지 못했습니다. 외부 폴더 열기를 이용하세요.");
+    const rows = await response.json();
+    if (request !== listRequest) return;
+    savedResults = rows.map(row => {
+      const date = new Date(row.createdAt);
+      const time = row.createdAt && Number.isFinite(date.getTime()) ? date.toLocaleString("ko-KR") : "시각 기록 없음";
+      const algorithm = row.algorithm ? algorithmName({algorithm:row.algorithm}) : "알고리즘 기록 없음";
+      const label = [scenarioName(row.configName), algorithm, time].join(" · ");
+      return {...row,label:label + " · " + row.runId.slice(-8),search:[label,row.configName,row.runId,row.algorithm].join(" ").toLowerCase()};
+    });
+    resultSearch.disabled = false;
+    resultSearch.oninput();
+    if (resultPicker.open) resultSearch.focus();
+  } catch (error) { if (request === listRequest) resultMessage.textContent = error.message; }
+  finally { if (request === listRequest) resultSearch.disabled = false; }
+};
+document.getElementById("btnBrowseResult").onclick = () => { resultPicker.close(); resultFolderInput.click(); };
+replayResultButton.onclick = async () => {
+  const id = resultList.value;
+  if (!id) return;
+  resultPicker.close();
+  const request = ++resultLoadRequest;
+  try {
+    setStatus("실행 결과를 불러오는 중…");
+    const response = await fetch("/api/result?metadata=1&runId=" + encodeURIComponent(id), {cache:"no-store"});
+    const payload = await response.json();
+    if (!response.ok || !payload?.bundle) throw Error(payload?.error || "실행 결과가 없습니다.");
+    await openResultBundle(payload.bundle, request);
+  } catch (error) {
+    if (request === resultLoadRequest) setStatus("결과를 불러오지 못했습니다: " + error.message + " 기존 화면을 유지합니다.");
+  }
+};
+resultList.ondblclick = () => replayResultButton.click();
+resultFolderInput.onchange = async e => {
   const selection = [...e.target.files]; e.target.value = "";
   if (!selection.length) return;
   const request = ++resultLoadRequest;
