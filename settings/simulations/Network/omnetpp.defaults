@@ -556,14 +556,12 @@ extends = LoadBackground, PaperS1McsrCutFlood
 [Config PaperS1McsrCutFloodResLoad]
 extends = LoadBackground, PaperS1McsrCutFloodRes
 
-# ---- DS / CSIB time model (paper Sec. III-C, V-C; time model only, NO SLS/CSIB packets are sent) ----
-# Every satellite plans on the CSIB version that has already reached it (computed over the live intra-SRD ISL graph).
-# Processing/serialisation times are assumptions (the paper gives none): the defaults are 0 = propagation only.
-# Link-failure CSIBs need failureKnowledge="propagate" (FailureKnowledge). NOT compiled/run in the sandbox: build in Docker first.
+# ---- DS / CSIB over simulated control packets ----
 
 [Config PaperS1McsrCsib]
-description = "Paper environment, MCSR-LS with DS/CSIB time model (periodic 180 s, vote, per-satellite applied version)"
+description = "Paper environment, MCSR-LS with packet-based DS/CSIB (180 s period, voting enabled)"
 extends = PaperS1Mcsr
+*.native.controlMode = "packet"
 *.satellite[*].net.routing.csibEnabled = true
 *.satellite[*].net.routing.csibPeriod = 180s
 *.satellite[*].net.routing.csibVote = true

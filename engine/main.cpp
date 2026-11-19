@@ -2,7 +2,6 @@
 // Native execution adapter, 2026-11-17. Vendored routing cores remain unchanged.
 #include "geometry.h"
 #include "vendor/routing/mcsr/planner.h"
-#include "vendor/routing/mcsr/csib.h"
 #include "vendor/routing/congestion/zones.h"
 #include <deque>
 #include <filesystem>
@@ -11,6 +10,8 @@
 #include <sstream>
 #include <regex>
 #include <chrono>
+#include <array>
+#include <optional>
 #include "control.h"
 double zoneCoefficient(const leocongestion::Zone &z,int id,double lat,double lon) {
   if(z.shape!=leocongestion::Zone::Box||std::abs(z.lonMax-z.lonMin)<360.-1e-9)return leocongestion::coefficient(z,id,lat,lon);
@@ -54,7 +55,6 @@ struct Context {
   std::function<std::vector<mcsr::Planner::Exit>(int)> exits;
   std::function<std::vector<std::pair<int,double>>(int)> uplinks;
   std::function<mcsr::FailureSet(int)> failures;
-  std::function<void(double,std::function<void()>)> schedule;
   std::function<void(J)> record;
 };
 struct ComputeTimer {
@@ -68,8 +68,6 @@ public:
   virtual Plan forward(Packet &p,int node,bool repair=false)=0;
   virtual int selectUplink(int source,int dest)=0;
   virtual bool sourceRouted() const {return false;}
-  virtual void onNetworkEvent(const J &event) {}
-  virtual void onTimer(const std::string &kind) {}
 };
 class DijkstraRouting:public Routing {
   Context &x; bool hop; long stamp=-1;
@@ -111,9 +109,6 @@ class McsrRouting:public Routing {
   Context &x; mcsr::Service service; mcsr::SelectionParams selection;
   using Planner=mcsr::Planner;
   std::shared_ptr<Planner> current;
-  std::map<double,std::shared_ptr<Planner>> snapshots;
-  std::unique_ptr<mcsr::SrdPlan> fixedPlan;
-  std::unique_ptr<mcsr::CsibModel> csib;
   int K=0,L=0;double sampled=-1;long epoch=-1,congestionEpoch=-1;
   std::map<std::tuple<const Planner*,int,int>,Plan> plans;
   long groundEpoch=-1;
@@ -141,56 +136,18 @@ class McsrRouting:public Routing {
       else {p=build(node);if(delivered.size()>=64){delivered.clear();plans.clear();}delivered[key]=p;}
       local={p,topology,x.epoch,x.now};return p;
     }
-    if(csib) {auto v=csib->viewAt(node,x.now);return snapshots.at(v?v->dataTime:0);}
     long e=x.c.value("snapshotOnDelayUpdate",true)?x.epoch:x.islEpoch;
     double interval=x.c.value("refreshInterval",0.);
     if(!current || epoch!=e || congestionEpoch!=x.congestionEpoch || (interval>0 && x.now-sampled>=interval-1e-10))build();
     return current;
-  }
-  void publish(const std::string &kind,int a=-1,int b=-1,double failedAt=0) {
-    auto p=build();snapshots[x.now]=p;
-    auto f=x.failures(-2);
-    if(kind=="periodic")csib->periodic(x.now,p->router(),p->graph(),f);
-    else if(kind=="failure")csib->onLinkFailure(failedAt,a,b,p->router(),p->graph(),f);
-    else csib->monitor(x.now,p->router(),p->graph(),f);
-    for(int k=0;k<fixedPlan->r;k++)for(const auto &v:csib->versions(k))if(v.dataTime==x.now) {
-      x.record({{"event","csib-generated"},{"srd",k},{"version",v.id},{"ds",v.ds},{"dataTime",v.dataTime},{"computeDone",v.computeDone}});
-      for(size_t i=0;i<v.members.size();i++)if(std::isfinite(v.arrival[i]) && v.arrival[i]>=x.now) {
-        int node=v.members[i],id=v.id;double data=v.dataTime;
-        x.schedule(v.arrival[i],[this,node,id,data]{x.record({{"event","csib-applied"},{"node",node},{"version",id},{"dataTime",data}});});
-      }
-    }
-    csib->prune(x.now);std::set<double> keep{0};
-    for(int k=0;k<fixedPlan->r;k++)for(auto &v:csib->versions(k))keep.insert(v.dataTime);
-    for(auto i=snapshots.begin();i!=snapshots.end();)if(!keep.count(i->first))i=snapshots.erase(i);else ++i;
   }
 public:
   McsrRouting(Context &ctx):x(ctx) {
     auto id=x.c.value("algorithm",std::string("mcsr-ls"));service=id=="mcsr-ts"?mcsr::Service::TS:id=="mcsr-hr"?mcsr::Service::HR:mcsr::Service::LS;
     selection.hrJitterMs=x.c.value("hrJitterMs",15.);double bound=x.c.value("tsDelayBoundMs",-1.);if(bound>=0)selection.tsDelayBoundMs=bound;
     K=x.c.contains("commonSrd")?x.c["commonSrd"]["K"].get<int>():x.c.value("srdK",0);L=x.c.contains("commonSrd")?x.c["commonSrd"]["L"].get<int>():x.c.value("srdL",0);auto p=build();
-    if(x.c.value("csibEnabled",false)&&x.c.value("controlMode",std::string("packet"))=="time") {
-      fixedPlan=std::make_unique<mcsr::SrdPlan>(p->srdPlan());mcsr::CsibParams cp;
-      cp.periodSec=x.c.value("csibPeriod",180.);cp.computeMs=x.c.value("processingMode",std::string("neutral"))=="neutral"?0:1000*x.c.value("csibComputeDelay",0.);
-      cp.reportProcMs=x.c.value("processingMode",std::string("neutral"))=="neutral"?0:1000*x.c.value("csibReportProcDelay",0.);cp.hopProcMs=x.c.value("processingMode",std::string("neutral"))=="neutral"?0:1000*x.c.value("csibHopProcDelay",0.);
-      cp.messageBytes=x.c.value("csibMessageBytes",0);cp.islBitsPerSecond=x.c.value("islDatarate",1e8);cp.useVote=x.c.value("csibVote",true);
-      double d=x.c.value("csibDetectDelay",-1.);if(d<0)d=x.c.value("slsInterval",.2)*x.c.value("slsMissCount",3);
-      cp.detectMs=1000*d;csib=std::make_unique<mcsr::CsibModel>(*fixedPlan,cp);
-      csib->initialize(p->router(),p->graph());snapshots[0]=p;
-      x.schedule(cp.periodSec,[this]{onTimer("periodic");});
-      double m=x.c.value("csibMonitorInterval",0.);if(m>0)x.schedule(m,[this]{onTimer("monitor");});
-    }
     if(x.c.contains("commonSrd")&&p->srdPlan().srdOf!=x.c["commonSrd"]["srdOf"].get<std::vector<int>>())throw std::runtime_error("Routing SRD differs from common mapping");
     x.record({{"event","srd"},{"K",K},{"L",L},{"srdOf",p->srdPlan().srdOf}});
-  }
-  void onTimer(const std::string &kind) override {
-    publish(kind);double interval=x.c.value(kind=="periodic"?"csibPeriod":"csibMonitorInterval",0.);
-    if(interval>0)x.schedule(x.now+interval,[this,kind]{onTimer(kind);});
-  }
-  void onNetworkEvent(const J &event) override {
-    if(!csib)return;
-    if(event.value("event",std::string())=="failure-detected")publish("failure",event["a"],event["b"],event["failedAt"]);
-    else if(event.value("event",std::string())=="restore")publish("monitor");
   }
   bool sourceRouted() const override {return true;}
   Plan forward(Packet &packet,int node,bool repair=false) override {
@@ -218,19 +175,21 @@ public:
     if(!repair && f.empty() && plans.count(key)){MCSR_OP(planHit,1);return plans.at(key);}
     MCSR_OP(planMiss,1);if(repair)MCSR_OP(recomputes,1);
     auto result=p->plan(node,x.exits(packet.dest),service,&f,selection);Plan out;
-    if(result.ok){out.path=result.path.sats;out.delay=result.path.t.D/1000;out.front=result.front;out.dataTime=csib?csib->viewAt(node,x.now)->dataTime:x.now;}
+    if(result.ok){out.path=result.path.sats;out.delay=result.path.t.D/1000;out.front=result.front;out.dataTime=x.now;}
     if(!repair && f.empty())plans[key]=out;return out;
   }
   int selectUplink(int src,int dst) override {
     ComputeTimer measure(x,"mcsr-access");
     int best=-1;double cost=INFINITY;
+    std::optional<std::vector<Planner::Exit>> exits;
     for(auto [sat,up]:x.uplinks(src)) {
-      Packet p;p.source=src;p.dest=dst;auto planner=view(sat);auto f=x.failures(sat);
+      auto planner=view(sat);
       if(groundEpoch!=x.epoch){plans.clear();groundEpoch=x.epoch;}
       // Access selection is delay-based for all service classes, as in the reference module.
       auto key=std::make_tuple(planner.get(),sat,-dst-1);Plan plan;
-      if(plans.count(key))plan=plans.at(key);
-      else {auto r=planner->plan(sat,x.exits(dst),mcsr::Service::LS,&f);if(r.ok)plan={r.path.sats,r.path.t.D/1000,sampled,false,r.front};plans[key]=plan;}
+      auto cached=plans.find(key);
+      if(cached!=plans.end())plan=cached->second;
+      else {if(!exits)exits=x.exits(dst);auto f=x.failures(sat);auto r=planner->plan(sat,*exits,mcsr::Service::LS,&f);if(r.ok)plan={r.path.sats,r.path.t.D/1000,sampled,false,r.front};plans[key]=plan;}
       double value=up+plan.delay;if(value<cost || (value==cost && sat<best)){cost=value;best=sat;}
     }
     return best;
@@ -258,8 +217,9 @@ struct Link {
   std::deque<std::shared_ptr<Packet>> queue;
 };
 struct Failure {int count=0;double since=0;std::vector<double> known;};
+enum class EventKind { Other, Geometry, Control, Data, Sample };
 struct Event {
-  Tick time;long long seq;std::function<void()> action;
+  Tick time;long long seq;std::function<void()> action;EventKind kind=EventKind::Other;
   bool operator<(const Event &b)const{return time==b.time?seq>b.seq:time>b.time;}
 };
 class Simulation {
@@ -303,9 +263,45 @@ public:
   std::vector<Recovery> recovery;
   double seconds()const{return now/TICKS;}
   double random(){return double(trafficRng())/4294967296.;}
-  void schedule(double t,std::function<void()> fn) {
+  using ProfileClock = std::chrono::steady_clock;
+  struct EventTiming { unsigned long long count=0, samples=0; double milliseconds=0; };
+  static constexpr unsigned PROFILE_INTERVAL=256;
+  bool profiling=false;
+  unsigned long long processedEvents=0;
+  std::array<EventTiming,5> eventTimings{};
+  ProfileClock::time_point profileStart=ProfileClock::now(), profileWritten=profileStart;
+  double queuePopMilliseconds=0, groundLinksMilliseconds=0;
+  unsigned long long queuePopSamples=0, groundLinkUpdates=0;
+  static double milliseconds(ProfileClock::duration duration) {
+    return std::chrono::duration<double,std::milli>(duration).count();
+  }
+  void writeProfile(ProfileClock::time_point nowWall) {
+    J kinds=J::object();
+    const std::array<const char*,5> names={"other","geometry","control","data","sample"};
+    for(size_t i=0;i<names.size();++i) {
+      const auto &t=eventTimings[i];
+      kinds[names[i]]={{"events",t.count},{"samples",t.samples},{"sampledMs",t.milliseconds},
+                       {"estimatedMs",t.samples?t.milliseconds*t.count/t.samples:0}};
+    }
+    J data={{"simTime",seconds()},{"elapsedMs",milliseconds(nowWall-profileStart)},{"events",kinds},
+            {"queuePopSamples",queuePopSamples},{"queuePopSampledMs",queuePopMilliseconds},
+            {"queuePopEstimatedMs",queuePopSamples?queuePopMilliseconds*processedEvents/queuePopSamples:0},
+            {"groundLinkUpdates",groundLinkUpdates},{"groundLinksMs",groundLinksMilliseconds},
+            {"routingInclusiveMs",context.computeMs},{"routingCalls",context.computations},{"cpuThreads",1}};
+    if(control)data["controlFrames"]={{"attempted",control->hopAccepted},{"arrived",control->arrived},
+                                    {"lsaAttempts",control->byKindJson().value("lsa",J::object()).value("frameAttempts",0LL)}};
+    std::ofstream(out+"/profile.tmp")<<data.dump(2);
+    std::error_code error;
+    std::filesystem::rename(out+"/profile.tmp",out+"/profile.json",error);
+    if(error) {
+      std::filesystem::remove(out+"/profile.json",error);
+      std::filesystem::rename(out+"/profile.tmp",out+"/profile.json",error);
+    }
+    profileWritten=nowWall;
+  }
+  void schedule(double t,std::function<void()> fn,EventKind kind=EventKind::Other) {
     if(!std::isfinite(t)||t<seconds()-1e-10)throw std::runtime_error("Invalid event time");
-    Tick tick=ticks(t);if(tick<limit)events.push({tick,sequence++,std::move(fn)});
+    Tick tick=ticks(t);if(tick<limit)events.push({tick,sequence++,std::move(fn),kind});
   }
   void record(J e) {
     if(control && e.value("event",std::string())=="knowledge-applied") {int node=e["node"];for(auto &event:recovery)if(seconds()<=event.until&&!std::isfinite(event.applied[node])&&control->matches(node,event.a,event.b,event.up,event.time))event.applied[node]=seconds();}
@@ -371,6 +367,7 @@ public:
       auto x=sat[a].getPos(),y=sat[b].getPos();double d=std::sqrt(sqr(x.m_x-y.m_x)+sqr(x.m_y-y.m_y)+sqr(x.m_z-y.m_z))*c.value("islDelay",.0000033356);
       linkState(a,b,d,c.value("islDatarate",1e8));linkState(b,a,d,c.value("islDatarate",1e8));
     }
+    const auto groundStart=profiling?ProfileClock::now():ProfileClock::time_point{};
     std::vector<int> counts(n+g);
     for(int i=0;i<g;i++) {
       auto p=ground[i];cSite site(p.lat,p.lon,p.alt);
@@ -386,9 +383,10 @@ public:
         linkState(n+i,j,d,c.value("groundlinkDatarate",5e7));linkState(j,n+i,d,c.value("groundlinkDatarate",5e7));
       }
     }
+    if(profiling){groundLinksMilliseconds+=milliseconds(ProfileClock::now()-groundStart);++groundLinkUpdates;}
     for(int u=0;u<n+g;u++)for(auto &[v,l]:links[u])if((u>=n||v>=n)&&!l.active){clearQueue(l,"link-down-in-queue");abort(l);}
     context.epoch++;context.now=t;applyCongestion(false);
-    if(reschedule)schedule(t+c.value("updateInterval",1.),[this]{update();});
+    if(reschedule)schedule(t+c.value("updateInterval",1.),[this]{update();},EventKind::Geometry);
   }
   double coefficient(const J &target,int id) {
     auto kind=target.value("kind",std::string());auto p=target.value("params",J::object());
@@ -478,13 +476,14 @@ public:
     double delay=l.prop+l.extra;if(c.value("jitterModel",std::string("packet"))=="packet"&&l.extraJ>0)delay+=uniform(*p,l,0x4a495454u)*2*std::sqrt(3.)*l.extraJ;
     bool lost=l.loss>0&&uniform(*p,l,0x4c4f5353u)<l.loss;
     Tick duration=std::max<Tick>(1,ticks((p->bytes+24)*8/l.rate));l.wireDuration=duration/TICKS;
-    schedule((now+duration)/TICKS,[this,p,a,b,delay,generation,lost]{
+    const auto kind=p->control?EventKind::Control:EventKind::Data;
+    schedule((now+duration)/TICKS,[this,p,a,b,delay,generation,lost,kind]{
       auto &l=links[a].at(b);if(l.generation!=generation)return;
       if(p->control&&control){control->wireBytes+=p->bytes+24;control->busySeconds+=l.wireDuration;control->count(p->control->kind,&ControlCounts::wireBytes,p->bytes+24);}
       l.transmitting=false;l.current.reset();
-      schedule(seconds()+delay,[this,p,a,b,lost]{if(lost)drop(p,"injected-loss");else arrive(p,b,a);});
+      schedule(seconds()+delay,[this,p,a,b,lost]{if(lost)drop(p,"injected-loss");else arrive(p,b,a);},kind);
       if(!l.active)clearQueue(l,"link-down-in-queue");drain(l);
-    });
+    },kind);
   }
   void accountPartialControl(Link &l) {
     if(!l.current||!l.current->control||!control)return;
@@ -645,10 +644,10 @@ public:
     activeRecovery[key]=recovery.size();
     recovery.push_back(std::move(event));
     failureLog<<seconds()<<','<<(restore?"restore":"failure")<<','<<a<<','<<b<<'\n';
-    if(router && !control) {
-      if(restore)router->onNetworkEvent({{"event","restore"}});
-      else {double failedAt=seconds(),detect=c.value("csibDetectDelay",-1.);if(detect<0)detect=c.value("slsInterval",.2)*c.value("slsMissCount",3);
-        schedule(seconds()+detect,[this,a,b,failedAt]{context.epoch++;router->onNetworkEvent({{"event","failure-detected"},{"a",a},{"b",b},{"failedAt",failedAt}});});}
+    if(router && !control && !restore) {
+      double detect=c.value("csibDetectDelay",-1.);
+      if(detect<0)detect=c.value("slsInterval",.2)*c.value("slsMissCount",3);
+      schedule(seconds()+detect,[this]{context.epoch++;});
     }
   }
   void failureSchedule() {
@@ -692,11 +691,13 @@ public:
     std::ofstream(out+"/progress.tmp")<<status.dump();
     std::error_code ec;std::filesystem::rename(out+"/progress.tmp",out+"/progress.json",ec);
     if(ec){std::filesystem::remove(out+"/progress.json",ec);std::filesystem::rename(out+"/progress.tmp",out+"/progress.json",ec);}
-    schedule(seconds()+1,[this]{sample();});
+    schedule(seconds()+1,[this]{sample();},EventKind::Sample);
   }
 public:
-  Simulation(J cfg,const std::string &directory):c(std::move(cfg)),out(directory),n(c["numSatellites"]),g(c["stations"].size()),limit(ticks(c["simTimeLimit"])),trafficRng(c.value("seed",23542)),failureRng(c.value("failureSeed",4242)),sat(n),ground(g),links(n+g) {
+  Simulation(J cfg,const std::string &directory,bool profile=false):c(std::move(cfg)),out(directory),n(c["numSatellites"]),g(c["stations"].size()),limit(ticks(c["simTimeLimit"])),trafficRng(c.value("seed",23542)),failureRng(c.value("failureSeed",4242)),sat(n),ground(g),links(n+g),profiling(profile) {
     if(n<6||n>20000||g<1||g>5000||limit<=0||c["planes"].get<int>()<2||n%c["planes"].get<int>())throw std::runtime_error("Invalid engine dimensions");
+    if(c.value("controlMode",std::string("packet"))=="time" && c.value("csibEnabled",false))
+      throw std::runtime_error("CSIB requires packet control mode");
     if(c.contains("modelVersion")&&c["modelVersion"]!=MODEL_VERSION)throw std::runtime_error("Engine model version mismatch");
     trackRecovery=!c.value("prepareOnly",false)&&(
       !c.value("physicalEvents",J::array()).empty()||!c.value("failureReplayEvents",J::array()).empty()||
@@ -713,7 +714,7 @@ public:
     csv<<std::setprecision(14)<<"time,route,source,station,firstSat,exitSat,satHops,uplinkMs,satToStationMs,totalMs,path\n";
     trace<<std::setprecision(14)<<"time,event,source,destination,detail,packet_id,hops\n";
     series<<std::setprecision(14)<<"time,source,destination,sent,received,dropped,throughputMbps,delayMs,queued\n";failureLog<<std::setprecision(14)<<"time,event,satA,satB\n";
-    context.c=c;context.revision=[this](int node){return control?control->revision(node):0;};context.topologyRevision=[this](int node){return control&&node>=0?control->views.at(node).topologyRevision:0;};context.n=n;context.g=g;context.graph=[this](int v){return graph(v);};context.exits=[this](int d){return exits(d);};context.uplinks=[this](int s){return uplinks(s);};context.failures=[this](int v){return knownFailures(v);};context.schedule=[this](double t,auto f){schedule(t,f);};context.record=[this](J e){record(e);};
+    context.c=c;context.revision=[this](int node){return control?control->revision(node):0;};context.topologyRevision=[this](int node){return control&&node>=0?control->views.at(node).topologyRevision:0;};context.n=n;context.g=g;context.graph=[this](int v){return graph(v);};context.exits=[this](int d){return exits(d);};context.uplinks=[this](int s){return uplinks(s);};context.failures=[this](int v){return knownFailures(v);};context.record=[this](J e){record(e);};
     zones=leocongestion::parseZones(c.value("congestionZones",std::string()));update();
     if(!c.contains("commonSrd")){
       mcsr::PlannerConfig pc;pc.planes=c["planes"];pc.satsPerPlane=per;pc.interPlaneSpacing=c["phasing"];pc.fixedK=c.value("srdK",0);pc.fixedL=c.value("srdL",0);
@@ -735,7 +736,7 @@ public:
         mcsr::PlannerConfig pc;pc.planes=c["planes"];pc.satsPerPlane=per;pc.interPlaneSpacing=c["phasing"];pc.fixedK=initialK;pc.fixedL=initialL;auto planner=mcsr::Planner::create(pc,graph(-1));
         for(int k=0;k<count;k++)owners[k]=planner->router().electDs(k,mcsr::FailureSet{});
       }
-      control=std::make_unique<ControlPlane>(c,n,nominalIsls,srdOf,owners,[this]{return seconds();},[this](double t,auto f){schedule(t,f);},
+      control=std::make_unique<ControlPlane>(c,n,nominalIsls,srdOf,owners,[this]{return seconds();},[this](double t,auto f){schedule(t,f,EventKind::Control);},
         [this](int a,int b,ControlPlane::Msg message,int ttl){
           int payload=c.value("controlMtu",1500)-40;if(payload<1)throw std::runtime_error("Invalid control MTU");
           int count=1+(message->payloadBytes-1)/payload;auto assembly=std::make_shared<ControlAssembly>();assembly->parts.resize(count,false);control->count(message->kind,&ControlCounts::messageHopAttempts);
@@ -751,11 +752,27 @@ public:
       auto &s=c["stations"][i];double start=s.contains("startTime")?s["startTime"].get<double>():s.contains("startRange")?s["startRange"][0].get<double>()+random()*(s["startRange"][1].get<double>()-s["startRange"][0].get<double>()):1+4*random();
       if(ticks(s["sendInterval"].get<double>())<1)throw std::runtime_error("Traffic interval below resolution");if(start<s.value("endTime",limit/TICKS))schedule(start,[this,i]{send(i);});
     }
-    schedule(1,[this]{sample();});
+    schedule(1,[this]{sample();},EventKind::Sample);
   }
   void run() {
     mcsr::OpScope count(&context.operations);
-    while(!events.empty()){auto e=events.top();events.pop();now=e.time;context.now=seconds();e.action();}
+    while(!events.empty()){
+      const bool measureQueue=profiling&&processedEvents%PROFILE_INTERVAL==0;
+      const auto begin=measureQueue?ProfileClock::now():ProfileClock::time_point{};
+      auto e=events.top();events.pop();
+      if(measureQueue){queuePopMilliseconds+=milliseconds(ProfileClock::now()-begin);++queuePopSamples;}
+      now=e.time;context.now=seconds();
+      if(!profiling){e.action();continue;}
+      auto &timing=eventTimings[static_cast<size_t>(e.kind)];
+      const bool measureAction=timing.count++%PROFILE_INTERVAL==0;
+      const auto actionStart=measureAction?ProfileClock::now():ProfileClock::time_point{};
+      e.action();
+      if(measureAction){timing.milliseconds+=milliseconds(ProfileClock::now()-actionStart);++timing.samples;}
+      if(++processedEvents%PROFILE_INTERVAL==0){
+        const auto time=ProfileClock::now();
+        if(time-profileWritten>=std::chrono::seconds(1))writeProfile(time);
+      }
+    }
     now=limit;context.now=seconds();for(auto &row:links)for(auto &[v,l]:row)accountPartialControl(l);sample();J rows=J::array();long long sent=0,received=0,dropped=0,attempted=0,bytes=0;double delaySum=0;
     for(auto &[key,f]:flows){sent+=f.sent;received+=f.received;dropped+=f.dropped;attempted+=f.attempted;bytes+=f.bytes;delaySum+=f.delaySum;
       rows.push_back({{"source",key.first},{"destination",key.second},{"attempted",f.attempted},{"sent",f.sent},{"received",f.received},{"dropped",f.dropped+f.sourceDropped},{"sourceDropped",f.sourceDropped},{"inFlight",f.sent-f.received-f.dropped},{"deliveryRate",f.attempted?100.*f.received/f.attempted:0},{"admittedDeliveryRate",f.sent?100.*f.received/f.sent:0},{"offeredDeliveryRate",f.attempted?100.*f.received/f.attempted:0},{"meanDelayMs",1000*f.mean},{"delayStdMs",f.received>1?1000*std::sqrt(f.m2/(f.received-1)):0},{"maxDelayMs",f.maxDelay*1000},{"jitterMs",f.jitter*1000},{"meanHops",f.received?double(f.hops)/f.received:0},{"maxGapSeconds",f.maxGap},{"outages",f.outages},{"throughputMbps",f.bytes*8/(limit/TICKS)/1e6}});}
@@ -765,6 +782,7 @@ public:
     result["appliedProcessingDelays"]=J::object();result["requestedProcessingDelays"]=J::object();for(auto key:{"reserveDelay","repairDelay","spfDelay","csibComputeDelay","csibReportProcDelay","csibHopProcDelay","floodHopDelay"}){result["requestedProcessingDelays"][key]=c.value(key,0.);result["appliedProcessingDelays"][key]=c.value("processingMode",std::string("neutral"))=="neutral"?0:c.value(key,0.);}
     if(!attempted)result["deliveryRate"]=nullptr;
     result["controlProtocolVersion"]=2;result["metricVersion"]=4;result["modelVersion"]=MODEL_VERSION;result["linkRandomDraws"]=linkRandomDraws;result["processingMode"]=c.value("processingMode",std::string("neutral"));result["controlMode"]=c.value("controlMode",std::string("packet"));result["jitterModel"]=c.value("jitterModel",std::string("packet"));
+    result["cpuThreads"]=1;
     result["computeMs"]=context.computeMs;result["computations"]=context.computations;
     auto &o=context.operations;result["operations"]=J::object();o.each([&](const char* key,std::uint64_t value){result["operations"][key]=value;});
     result["approximation"]={{"labelCap",c.value("labelCap",32)},{"capEvict",o.capEvict},{"capReject",o.capReject},{"limited",o.capEvict+o.capReject>0}};
@@ -784,11 +802,12 @@ public:
     if(control&&control->hopAccepted<control->arrived+control->dropped)throw std::runtime_error("Control conservation failed");
     if(attempted!=received+dropped+noUplink+(sent-received-dropped))throw std::runtime_error("Offered packet conservation failed");
     std::ofstream(out+"/summary.json")<<result.dump(2);
+    if(profiling)writeProfile(ProfileClock::now());
   }
 };
 #ifndef LEO_KERNEL_TEST
 int main(int argc,char **argv) {
-  try{if(argc!=3&&argc!=4)throw std::runtime_error("Usage: engine.exe input.json output-directory");J c;std::ifstream(argv[1])>>c;if(argc==4&&std::string(argv[3])=="--prepare"){c["prepareOnly"]=true;c["algorithm"]="dijkstra-delay";c["controlMode"]="time";}Simulation simulation(c,argv[2]);simulation.run();return 0;}
+  try{if(argc!=3&&argc!=4)throw std::runtime_error("Usage: engine.exe input.json output-directory");J c;std::ifstream(argv[1])>>c;if(argc==4&&std::string(argv[3])=="--prepare"){c["prepareOnly"]=true;c["algorithm"]="dijkstra-delay";c["controlMode"]="time";c["csibEnabled"]=false;}Simulation simulation(c,argv[2],argc==4&&std::string(argv[3])=="--profile");simulation.run();return 0;}
   catch(const std::exception &e){std::cerr<<e.what()<<'\n';return 1;}
 }
 

@@ -19,9 +19,12 @@ int main(){
   ControlPlane plane(cfg,4,{{0,1},{1,2},{2,3}},{0,0,0,0},{3},[]{return 0.;},[](double,std::function<void()>){},
     [&](int from,int to,ControlPlane::Msg m,int ttl){hops.push({from,to,m,ttl});sends++;},
     [](int u){std::vector<LinkReport> out;for(int v=0;v<4;v++)if(std::abs(u-v)==1)out.push_back({u,v});return out;},[](J){},[](int,int owner){return owner;},[](int,int){return 1.;},[]{return 0L;});
-  auto adv=std::make_shared<Advertisement>();adv->origin=0;adv->version=2;adv->links={{0,1,true,2.,1.,0.}};
+  auto adv=std::make_shared<Advertisement>(0,2,0.,std::vector<LinkReport>{{0,1,true,2.,1.,0.}});
   auto message=std::make_shared<ControlMessage>();message->kind="report";message->origin=0;message->target=3;message->region=0;message->round=1;message->nonce=100;message->records={adv};
   plane.receive(0,-1,message,4);
   while(!hops.empty()){auto [from,to,m,ttl]=hops.front();hops.pop();plane.receive(to,from,m,ttl);}
-  assert(sends==3);assert(plane.views[1].info.empty());assert(plane.views[2].info.empty());assert(plane.views[3].info.count(0));
+  assert(sends==3);assert(plane.views[1].info.empty());assert(plane.views[2].info.empty());assert(plane.views[3].info.count(0));assert(plane.revision(3)!=0);
+  Advertisement refreshed=*adv;refreshed.version++;
+  assert(refreshed.contentHash==adv->contentHash);
+  assert(Advertisement(0,3,0.,{{0,1,true,3.,1.,0.}}).contentHash!=adv->contentHash);
 }

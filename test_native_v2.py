@@ -38,6 +38,29 @@ class IniV2Tests(unittest.TestCase):
             before=path.read_bytes()
             with self.assertRaises(ValueError):edit(path,'A',{'sendInterval':'1ps'},reader)
             self.assertEqual(path.read_bytes(),before)
+    def test_time_mode_requires_csib_off(self):
+        from run_manager import execute, start
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);ini=root/'omnetpp.ini'
+            ini.write_text('[General]\n*.numSatellites=12\n*.**.planeCount=4\n**.nrOfGS=2\n[Config A]\n*.station[0].traffic.enabled=true\n*.station[0].traffic.dstStation=1\n')
+            reader=lambda name,variables=None:server.read_ini_config(name,entry_path=str(ini),variables=variables)
+            self.assertEqual(reader('A')['controlMode'],'packet')
+            before=ini.read_bytes()
+            invalid={'controlMode':'time','csibEnabled':True}
+            with self.assertRaisesRegex(ValueError,'CSIB'):edit(ini,'A',invalid,reader)
+            self.assertEqual(ini.read_bytes(),before)
+            ini.write_bytes(before+b'*.native.controlMode="time"\n*.satellite[*].net.routing.csibEnabled=true\n')
+            self.assertTrue(reader('A')['csibEnabled'])
+            for launch in (start,execute):
+                with self.assertRaisesRegex(ValueError,'CSIB'):launch(root,root,ini,'A',reader)
+            self.assertFalse((root/'data').exists())
+            result=edit(ini,'A',{'csibEnabled':False},reader)
+            self.assertEqual(result['controlMode'],'time')
+            self.assertFalse(result['csibEnabled'])
+        for default in ('omnetpp.ini','omnetpp.defaults'):
+            profile=server.read_ini_config('PaperS1McsrCsib',entry_path=str(Path(server.INI_PATH).with_name(default)))
+            self.assertEqual(profile['controlMode'],'packet')
+            self.assertTrue(profile['csibEnabled'])
     def test_environment_fingerprint_excludes_algorithm_but_not_queue(self):
         a=server.read_ini_config('Dijkstra132');b=copy.deepcopy(a);b['algorithm']='mcsr-hr'
         self.assertEqual(fingerprint(a),fingerprint(b));b['queueCapacity']+=1
@@ -84,6 +107,18 @@ class EngineV2Tests(unittest.TestCase):
         c=server.read_ini_config('PaperS1Dijkstra');c.update(simTimeLimit=2,validateGeometry=True)
         c['stations'][18]['startTime']=0
         self.run_case(c)
+    def test_engine_rejects_time_csib_before_writing_results(self):
+        c=self.single();c.update(controlMode='time',csibEnabled=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp);source=path/'input.json';source.write_text(json.dumps(c))
+            output=path/'results'
+            result=subprocess.run([self.exe,str(source),str(output)],capture_output=True,text=True,timeout=10)
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('CSIB requires packet control mode',result.stderr)
+            self.assertFalse(output.exists())
+        c['csibEnabled']=False
+        summary,_=self.run_case(c)
+        self.assertEqual(summary['controlMode'],'time')
     def test_fault_recovery_and_csib_use_original_core(self):
         c=server.read_ini_config('Mcsr132');c.update(simTimeLimit=4,minimumElevation=0,csibEnabled=True,csibPeriod=1,csibDetectDelay=.05,csibComputeDelay=.01,failureSchedule='route@1+1',failureKnowledge='propagate',slsInterval=.02,slsMissCount=2)
         for s in c['stations']:s['enabled']=False

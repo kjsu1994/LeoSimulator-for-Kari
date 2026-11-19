@@ -134,7 +134,9 @@ def edit(path,config,changes,read_config,scenario=None,*,reset=False):
         shadow.write_bytes(updated)
         from server import read_ini_config
         from run_manager import load_external_inputs
+        from native_engine import validate_control_mode
         candidate=read_ini_config(config,entry_path=str(shadow))
+        validate_control_mode(candidate)
         load_external_inputs(candidate,path)
         if path.read_bytes()!=before:raise ValueError('INI changed during editing; refresh and retry')
         os.replace(shadow,path)

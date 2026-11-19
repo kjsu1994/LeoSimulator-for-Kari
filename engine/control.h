@@ -8,7 +8,29 @@ struct ControlAssembly {
     parts[part]=true;done=++received==int(parts.size());return done;}
 };
 struct LinkReport { int a,b; bool up=true; double extra=0,A=1,J=0; };
-struct Advertisement { int origin; unsigned long long version;double observedAt=0; std::vector<LinkReport> links; };
+inline unsigned long long controlHashMix(unsigned long long x) {
+  x+=0x9e3779b97f4a7c15ull;x=(x^(x>>30))*0xbf58476d1ce4e5b9ull;x=(x^(x>>27))*0x94d049bb133111ebull;return x^(x>>31);
+}
+struct Advertisement {
+  int origin;
+  unsigned long long version;
+  double observedAt;
+  const std::vector<LinkReport> links;
+  const unsigned long long contentHash;
+
+  Advertisement(int origin,unsigned long long version,double observedAt,std::vector<LinkReport> rows)
+    :origin(origin),version(version),observedAt(observedAt),links(std::move(rows)),contentHash(hashLinks(links)) {}
+private:
+  static unsigned long long hashLinks(const std::vector<LinkReport>& rows) {
+    unsigned long long h=0;
+    for(const auto &r:rows) {
+      h^=controlHashMix((static_cast<unsigned long long>(r.a)<<32)|unsigned(r.b));
+      h=controlHashMix(h^unsigned(r.up));
+      for(double v:{r.extra,r.A,r.J})h=controlHashMix(h^std::hash<double>{}(v));
+    }
+    return h;
+  }
+};
 struct ControlMessage {
   std::string kind; int origin=0,target=-1,region=-1,ds=-1; unsigned long long nonce=0,round=0;
   std::vector<std::shared_ptr<const Advertisement>> records;
@@ -43,16 +65,12 @@ private:
   std::set<int> pendingRegions;
   std::function<long()> geometryRevision;long routeEpoch=-1;
   std::map<std::tuple<int,int,unsigned long long>,std::vector<int>> routeCache;
-  static unsigned long long mix(unsigned long long x){x+=0x9e3779b97f4a7c15ull;x=(x^(x>>30))*0xbf58476d1ce4e5b9ull;x=(x^(x>>27))*0x94d049bb133111ebull;return x^(x>>31);}
-  static unsigned long long content(const Advertisement &a) {
-    unsigned long long h=0;for(auto &r:a.links){h^=mix((static_cast<unsigned long long>(r.a)<<32)|unsigned(r.b));h=mix(h^unsigned(r.up));for(auto v:{r.extra,r.A,r.J})h=mix(h^std::hash<double>{}(v));}return h;
-  }
   void apply(int node,const std::vector<std::shared_ptr<const Advertisement>>& records) {
     auto &v=views[node];bool changed=false;
     for(auto &a:records){auto at=v.info.find(a->origin);if(at!=v.info.end()&&at->second->version>=a->version)continue;
       auto previous=at==v.info.end()?initial[a->origin]:at->second;
-      auto oldContent=content(*previous),newContent=content(*a);if(oldContent!=newContent)v.revision^=mix(oldContent)^mix(newContent);
-      v.info[a->origin]=a;for(auto &r:a->links){auto key=mcsr::linkKey(r.a,r.b);bool before=v.down.links.count(key),after=!r.up||!perceived(node,r.b,r.a).up;if(after)v.down.links.insert(key);else v.down.links.erase(key);if(before!=after)v.topologyRevision^=mix(key);}
+      auto oldContent=previous->contentHash,newContent=a->contentHash;if(oldContent!=newContent)v.revision^=controlHashMix(oldContent)^controlHashMix(newContent);
+      v.info[a->origin]=a;for(auto &r:a->links){auto key=mcsr::linkKey(r.a,r.b);bool before=v.down.links.count(key),after=!r.up||!perceived(node,r.b,r.a).up;if(after)v.down.links.insert(key);else v.down.links.erase(key);if(before!=after)v.topologyRevision^=controlHashMix(key);}
       changed=true;}
     if(changed)record({{"event","knowledge-applied"},{"node",node},{"revision",v.revision}});
   }
@@ -94,7 +112,7 @@ private:
     if(!changed)return old;
     if(old)for(size_t i=0;i<rows.size();i++)if(rows[i].up!=old->links[i].up){statusDirty[u]=true;record({{"event","link-detected"},{"a",u},{"b",rows[i].b},{"up",rows[i].up}});}
     metricDirty[u]=metricDirty[u]||metrics;
-    auto a=std::make_shared<Advertisement>();a->origin=u;a->version=++versions[u];a->observedAt=now();a->links=std::move(rows);local[u]=a;apply(u,{a});return a;
+    auto a=std::make_shared<Advertisement>(u,++versions[u],now(),std::move(rows));local[u]=a;apply(u,{a});return a;
   }
   bool hierarchical()const{return cfg.value("csibEnabled",false)&&cfg.value("algorithm",std::string()).find("mcsr-")==0;}
   void announce(int u,unsigned long long round=0,bool voting=false) {
@@ -154,7 +172,7 @@ public:
     if(region.empty()){region.assign(n,0);ds={0};}
     members.resize(ds.size());collecting.resize(ds.size());for(int u=0;u<n;u++)members.at(region[u]).push_back(u);for(size_t k=0;k<ds.size();k++)if(ds[k]<0)ds[k]=members[k].front();knownOwner.resize(n);ownerRevision.assign(n,0);for(int u=0;u<n;u++)knownOwner[u]=ds[region[u]];
     for(auto [a,b]:edges){neighbors[a].push_back(b);neighbors[b].push_back(a);heard[a][b]=heard[b][a]=0;}
-    for(int u=0;u<n;u++) {std::sort(neighbors[u].begin(),neighbors[u].end());neighbors[u].erase(std::unique(neighbors[u].begin(),neighbors[u].end()),neighbors[u].end());auto a=std::make_shared<Advertisement>();a->origin=u;a->version=1;versions[u]=1;a->links=sample(u);local[u]=a;initial[u]=a;}
+    for(int u=0;u<n;u++) {std::sort(neighbors[u].begin(),neighbors[u].end());neighbors[u].erase(std::unique(neighbors[u].begin(),neighbors[u].end()),neighbors[u].end());auto a=std::make_shared<Advertisement>(u,1,0.,sample(u));versions[u]=1;local[u]=a;initial[u]=a;}
     // The preinstalled snapshot is immutable; later information only arrives by wire.
     schedule(cfg.value("slsInterval",.2),[this]{heartbeat();});schedule(cfg.value("controlRefresh",5.),[this]{refresh();});
     schedule(cfg.value("controlResyncInterval",30.),[this]{resync();});

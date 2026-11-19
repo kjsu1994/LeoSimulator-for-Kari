@@ -62,7 +62,6 @@ const settingHelp={
   csibReportProcDelay:"가정 모델에서 상태 보고를 처리하는 시간입니다.",
   csibHopProcDelay:"가정 모델에서 CSIB를 다음 홉으로 전달할 때 부과하는 처리 시간입니다.",
   csibMessageBytes:"CSIB 메시지에 가정하는 최소 크기입니다. 0이면 내용을 기준으로 자동 계산합니다.",
-  csibDetectDelay:"시간 모델에서 CSIB 장애 감지에 가정한 시간입니다. -1은 SLS 설정을 따릅니다.",
   slsInterval:"이웃 위성의 상태를 확인하는 간격입니다. 짧게 하면 감지가 빨라질 수 있고 제어 전송이 늘어납니다.",
   slsMissCount:"링크 장애로 판단하기까지 상태 메시지를 연속해서 놓친 횟수입니다.",
   floodHopDelay:"장애 정보가 한 홉을 지나갈 때 부과하는 가정 지연입니다.",
@@ -70,7 +69,7 @@ const settingHelp={
   srdK:"SRD를 나눌 때 궤도면 방향 크기입니다. 0이면 자동으로 정합니다.",
   srdL:"SRD를 나눌 때 같은 궤도면 안의 위성 방향 크기입니다. 0이면 자동으로 정합니다.",
   processingMode:"가정값 적용을 선택하면 지정한 경로 전환·제어 처리 지연이 반영됩니다.",
-  controlMode:"실제 패킷은 제어 메시지의 전송·큐잉·손실을 계산합니다. 시간 가정은 설정된 지연으로 정보를 전달합니다.",
+  controlMode:"실제 패킷은 제어 메시지의 전송·큐잉·손실을 계산합니다. 시간 가정은 설정된 지연으로 정보를 전달하고 CSIB를 사용하지 않습니다.",
   jitterModel:"실제 지연 변동은 패킷 도착에도 영향을 줍니다. 라우팅 비용 주입은 경로 평가에 반영합니다.",
   floodModel:"MCSR의 기준 경로 계산 방식을 선택합니다. 방식을 바꾸면 탐색 비용이나 경로 후보가 달라질 수 있습니다.",
   controlRefresh:"제어 상태를 다시 읽는 주기입니다. 짧게 하면 정보가 자주 갱신되고 전송이 늘 수 있습니다.",
@@ -144,12 +143,14 @@ function value(id){return byId(id)?.value;}
 function numeric(id){const v=Number(value(id));if(!Number.isFinite(v)||value(id)==="")throw Error("입력값을 확인하세요.");return v;}
 function modeChanged(){const mode=value("edit-congestionMode");byId("scenarioModeText").textContent=mode==="actual"?"실제 송신과 큐의 대기·폐기를 기록합니다.":"외부 혼잡 효과를 링크 상태에 반영합니다.";}
 function updateMcsrControls(){
-  const algorithm=value("edit-algorithm"),mcsr=algorithm.startsWith("mcsr-"),packet=value("edit-controlMode")==="packet",assumed=value("edit-processingMode")==="assumed",csib=mcsr&&byId("edit-csibEnabled").checked,environment=value("edit-congestionMode")==="environment";
+  const algorithm=value("edit-algorithm"),mcsr=algorithm.startsWith("mcsr-"),packet=value("edit-controlMode")==="packet",assumed=value("edit-processingMode")==="assumed",csib=mcsr&&packet&&byId("edit-csibEnabled").checked,environment=value("edit-congestionMode")==="environment";
   for(const group of document.querySelectorAll("[data-mcsr]"))group.hidden=!mcsr;
+  const checkbox=byId("edit-csibEnabled");
+  byId("settingsCsib").hidden=!packet||(!mcsr&&!checkbox.checked);
   const conditions={
     hrJitterMs:algorithm==="mcsr-hr",tsDelayBoundMs:algorithm==="mcsr-ts",jitterWindow:mcsr,jitterSource:mcsr,
     csibVote:csib,csibPeriod:csib,csibMonitorInterval:csib,csibMessageBytes:csib,
-    csibComputeDelay:csib&&assumed,csibReportProcDelay:csib&&assumed&&packet,csibHopProcDelay:csib&&assumed&&packet,csibDetectDelay:csib&&!packet,
+    csibComputeDelay:csib&&assumed,csibReportProcDelay:csib&&assumed&&packet,csibHopProcDelay:csib&&assumed&&packet,
     reserveDelay:mcsr&&assumed,repairDelay:mcsr&&assumed,spfDelay:!mcsr&&assumed,floodHopDelay:assumed||!packet,
     failureKnowledge:!packet,failureScopeHops:!packet&&value("edit-failureKnowledge")==="propagate",
     routingQueueCapacity:mcsr&&!packet&&Number(value("edit-queueCapacity"))===0,
@@ -207,9 +208,9 @@ function openSettings(cfg,resetDefaults=false){
   for(const f of cfg.capabilities.fields.filter(f=>!basicKeys.includes(f.key)&&!common.includes(f.key)&&!csibKeys.includes(f.key)&&!experimental.includes(f.key)&&!["slsInterval","slsMissCount","floodHopDelay","spfDelay"].includes(f.key)))addField(mf,f);
   mf.append(control("지터 측정 방식","edit-jitterSource",cfg.jitterSource,"select",{arrival:"도착 지연 변동",delayChange:"전파 지연 변화"}));
   for(const key of ["reservedPaths","snapshotOnDelayUpdate"]){const label=node("label",{class:"check-field"});label.append(node("input",{id:"edit-"+key,type:"checkbox",checked:cfg[key]}),document.createTextNode(key==="reservedPaths"?"예비 경로 사용":"전파 지연 갱신 시 상태 재계산"));mf.append(label);}
-  const [csib,cf]=group("DS·CSIB");csib.dataset.mcsr="1";container.append(csib);
+  const [csib,cf]=group("DS·CSIB");csib.id="settingsCsib";container.append(csib);
   for(const key of ["csibEnabled","csibVote"]){const label=node("label",{class:"check-field"});label.append(node("input",{id:"edit-"+key,type:"checkbox",checked:cfg[key]}),document.createTextNode(key==="csibEnabled"?"DS·CSIB 사용":"DS 투표 사용"));cf.append(label);}
-  for(const f of cfg.capabilities.fields.filter(f=>csibKeys.includes(f.key)))addField(cf,f);
+  for(const f of cfg.capabilities.fields.filter(f=>csibKeys.includes(f.key)&&f.key!=="csibDetectDelay"))addField(cf,f);
   const [srd,sg]=group("공통 SRD");
   for(const f of cfg.capabilities.fields.filter(f=>experimental.includes(f.key)))addField(sg,f);
   mg.append(control("MCSR 경로 계산 방식","edit-floodModel",cfg.floodModel,"select",{paper:"참조 방식",consistent:"축 일관 방식 (추가 실험)"}));
@@ -240,7 +241,7 @@ function openSettings(cfg,resetDefaults=false){
   const move=(keys,target)=>{for(const key of keys){const input=byId("edit-"+key);if(input)target.append(input.closest("label"));}};
   move(["labelCap","routingQueueCapacity","refreshInterval","flowTimeout","jitterWindow","jitterSource","snapshotOnDelayUpdate"],rg);
   move(["slsInterval","slsMissCount","controlRefresh","controlTimeout","controlHeaderBytes","controlRecordBytes","controlMtu","controlReassemblyTimeout","controlResyncInterval","csibPeriod","csibMonitorInterval","csibMessageBytes"],pg);
-  move(["reserveDelay","repairDelay","spfDelay","floodHopDelay","failureKnowledge","failureScopeHops","csibComputeDelay","csibReportProcDelay","csibHopProcDelay","csibDetectDelay"],mg);
+  move(["reserveDelay","repairDelay","spfDelay","floodHopDelay","failureKnowledge","failureScopeHops","csibComputeDelay","csibReportProcDelay","csibHopProcDelay"],mg);
   byId("edit-floodModel").closest("label").dataset.mcsr="1";
   move(["islMode","islScheduleFile"],lf);lf.append(scheduleLabel);
   ag.append(models,recording);
@@ -320,6 +321,7 @@ byId("settingsForm").onsubmit=async event=>{
     for(const [key,original]of Object.entries({destination:first.dstStation,packetSize:first.packetSize,sendInterval:first.sendInterval,endTime:first.endTime,startTime:first.startTime})){if(value("edit-"+key)!==""&&numeric("edit-"+key)!==original)changes[key]=numeric("edit-"+key);}
     for(const f of cfg.capabilities.fields){const input=byId("edit-"+f.key);if(input&&!input.disabled)changes[f.key]=numeric("edit-"+f.key);}
     for(const key of Object.keys(cfg.capabilities.booleans)){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.checked;}
+    if(value("edit-controlMode")==="time")changes.csibEnabled=false;
     for(const key of Object.keys(cfg.capabilities.choices)){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.value;}
     for(const key of ["congestionMode","failureSchedule","failureKnowledge","congestionZones","routeRecording","failureReplay"]){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.value;}
     for(const key of ["randomFailures","randomStart","randomEnd","randomDuration","failureSeed","congestionRefresh","congestionBuffer","congestionPacketBytes"]){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=numeric("edit-"+key);}

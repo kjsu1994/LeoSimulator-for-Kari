@@ -99,6 +99,11 @@ FIELDS=[
 BOOL_FIELDS={'reservedPaths':False,'snapshotOnDelayUpdate':True,'csibEnabled':False,'csibVote':True,'congestionAware':False}
 ENUM_FIELDS={'jitterSource':('arrival','delayChange'),'floodModel':('paper','consistent')}
 
+def validate_control_mode(config):
+    if config.get('controlMode') == 'time' and config.get('csibEnabled'):
+        raise ValueError('시간 가정에서는 CSIB를 사용할 수 없습니다. 실제 패킷으로 바꾸거나 CSIB를 끄세요.')
+
+
 def capabilities():
     return {'algorithms':ALGORITHMS,'fields':[dict(zip(('key','label','ini','type','default','min','max'),f)) for f in FIELDS],
             'booleans':BOOL_FIELDS,'choices':ENUM_FIELDS,'tickSeconds':TICK}

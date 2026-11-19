@@ -244,6 +244,8 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
             cfg=load_external_inputs(read_config(config_name,variables=variables),ini)
             inputs={p.relative_to(settings).as_posix():p.read_bytes() for p in Path(settings).rglob('*.ini') if not p.name.startswith('.')}
     else:cfg,inputs=frozen
+    from native_engine import validate_control_mode
+    validate_control_mode(cfg)
     cfg=prepare(base,cfg,cancel)
     folder=base/'data/runs'/run_id;folder.mkdir(parents=True,exist_ok=False)
     (folder/'engine-input.json').write_text(json.dumps(cfg,ensure_ascii=False,allow_nan=False),encoding='utf-8')
@@ -305,11 +307,12 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
     return result
 
 def start(base,settings,ini,name,read_config,variables=None,algorithms=None,research=None):
+    from native_engine import ALGORITHMS, validate_control_mode
     # Validate before accepting the job; a rejected request creates no run folder.
     with CONFIG_LOCK:
         cfg=load_external_inputs(read_config(name,variables=variables),ini)
+        validate_control_mode(cfg)
         inputs={p.relative_to(settings).as_posix():p.read_bytes() for p in Path(settings).rglob('*.ini') if not p.name.startswith('.')}
-    from native_engine import ALGORITHMS
     if algorithms is not None and (not isinstance(algorithms,list) or not algorithms or len(set(algorithms))!=len(algorithms) or any(a not in ALGORITHMS for a in algorithms)):raise ValueError('Select valid algorithms')
     options={} if research is None else research
     if not isinstance(options,dict) or set(options)-{'repetitions','seedStart','warmupSeconds','drainSeconds','executionMode'}:raise ValueError('비교 실행 옵션을 확인하세요.')

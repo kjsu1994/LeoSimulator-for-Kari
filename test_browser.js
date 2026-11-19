@@ -67,7 +67,7 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     assert.equal(await evaluate("document.getElementById('scenarioDetails').open"),true);
     assert.equal(await evaluate("document.querySelector('#iniTable tbody').children.length"),1);
     await evaluate("document.querySelector('#scenarioDetails summary').click();iniFilter.value='';iniFilter.oninput()");
-    assert(await evaluate("document.querySelector('.brand-logo').naturalWidth>0"));
+    assert(await evaluate("document.querySelector('.brand-logo').naturalWidth>0 && getComputedStyle(document.querySelector('.brand-logo')).filter==='brightness(0) invert(1)'"));
     console.log("Scenario UI passed: concise conditions, details collapsed by default, disclosure and search work");
     assert.equal(await evaluate("document.getElementById('cfgName').disabled"),false);
     assert(await evaluate("document.getElementById('runnerActions').checkVisibility() && !document.getElementById('btnOpenIni').checkVisibility()"));
@@ -144,7 +144,9 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     assert(await evaluate("!byId('edit-csibPeriod').disabled && !byId('edit-csibComputeDelay').disabled && !byId('settingsModelStatus').hidden"));
     await evaluate("byId('edit-processingMode').value='neutral';updateMcsrControls();byId('edit-processingMode').value='assumed';updateMcsrControls()");
     assert(await evaluate("!byId('edit-csibComputeDelay').disabled"));
-    await evaluate("byId('edit-algorithm').value='dijkstra-delay';byId('edit-controlMode').value='time';byId('edit-failureKnowledge').value='propagate';updateMcsrControls()");
+    await evaluate("byId('edit-controlMode').value='time';updateMcsrControls()");
+    assert(await evaluate("byId('settingsCsib').hidden && byId('edit-csibEnabled').disabled && byId('edit-csibPeriod').disabled && byId('edit-csibComputeDelay').disabled && !byId('edit-csibDetectDelay')"));
+    await evaluate("byId('edit-algorithm').value='dijkstra-delay';byId('edit-failureKnowledge').value='propagate';updateMcsrControls()");
     assert(await evaluate("!byId('edit-failureScopeHops').disabled && !byId('edit-srdK').disabled && byId('edit-floodModel').disabled && !byId('edit-spfDelay').disabled"));
     await evaluate("byId('edit-controlMode').value='packet';byId('edit-processingMode').value='neutral';byId('edit-algorithm').value='mcsr-ls';updateMcsrControls()");
     assert(await evaluate("byId('edit-failureScopeHops').disabled && byId('edit-spfDelay').disabled && byId('settingsModelStatus').hidden"));
@@ -163,6 +165,10 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     assert(await evaluate("!Object.hasOwn(savedRequest.changes,'hrJitterMs') && !Object.hasOwn(savedRequest.changes,'csibComputeDelay') && !Object.hasOwn(savedRequest.changes,'controlMode')"));
     console.log("Settings passed: algorithm-specific visibility, common SRD, model status, reversible mode changes, hidden and unchanged INI values preserved");
     await evaluate("window.fetch=window.realFetch");
+
+    await evaluate("(async()=>{openSettings(await fetch('/api/config?config=PaperS1McsrCsib').then(r=>r.json()));byId('edit-controlMode').value='time';updateMcsrControls();byId('settingsForm').requestSubmit(byId('settingsForm').querySelector('[type=submit]'));})()");
+    await retry(async()=>assert(await evaluate("!byId('settingsDialog').open")));
+    assert(await evaluate("fetch('/api/config?config=PaperS1McsrCsib').then(r=>r.json()).then(c=>c.controlMode==='time' && !c.csibEnabled)"));
 
     const nativeFolder=path.join(profile,'native');fs.mkdirSync(nativeFolder);
     const script="import sys,pathlib,shutil,json; import server,run_manager; b=pathlib.Path(sys.argv[1]); (b/'engine').mkdir();shutil.copy2(pathlib.Path(server.BASE_DIR)/'engine/engine.exe',b/'engine/engine.exe');shutil.copy2(pathlib.Path(server.BASE_DIR)/'replay-model.json',b/'replay-model.json');c=server.read_ini_config('Mcsr132');c['simTimeLimit']=2;[s.update(startTime=0) for s in c['stations']];inputs={p.relative_to(server.LEO_DIR).as_posix():p.read_bytes() for p in pathlib.Path(server.LEO_DIR).rglob('*.ini')};r=run_manager.execute(b,server.LEO_DIR,server.INI_PATH,'Mcsr132',server.read_ini_config,frozen=(c,inputs));(b/'browser-result.json').write_text(json.dumps(r),encoding='utf-8')";
@@ -236,7 +242,7 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
       fs.copyFileSync(path.join(httpRoot,file),path.join(offline,file));
     await send("Page.navigate", {url: require("node:url").pathToFileURL(path.join(offline, "index.html")).href});
     await retry(async()=> assert(await evaluate("location.protocol === 'file:' && typeof resultMeta !== 'undefined' && resultMeta?.replay === true")));
-    assert(await evaluate("document.querySelector('.brand-logo').naturalWidth>0"));
+    assert(await evaluate("document.querySelector('.brand-logo').naturalWidth>0 && getComputedStyle(document.querySelector('.brand-logo')).filter==='brightness(0) invert(1)'"));
     assert.equal(await evaluate("document.getElementById('cfgName').checkVisibility()"),false);
     assert.equal(await evaluate("document.getElementById('runnerActions').checkVisibility()"),false);
     assert(await evaluate("(()=>{let picked=false;byId('resultFolder').click=()=>{picked=true;};byId('btnOpenResult').click();delete byId('resultFolder').click;return picked&&!byId('resultDialog').open;})()"));
