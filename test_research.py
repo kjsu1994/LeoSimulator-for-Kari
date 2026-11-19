@@ -143,6 +143,74 @@ class ResearchTests(unittest.TestCase):
 
 
 class ExperimentTests(unittest.TestCase):
+    def test_scheduler_orders_results_and_respects_available_memory(self):
+        import threading,time
+        from unittest.mock import patch
+        cfg=server.read_ini_config('Dijkstra132')
+        cfg.update(physicalEventsHash='common',physicalEvents=[],externalInputs={})
+        for available,mode,peak in [
+            (8,'auto',2),(2,'auto',1),(8,'sequential',1),
+        ]:
+            with self.subTest(available=available,mode=mode),tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp)
+                second_finished=threading.Event()
+                def execute(base,settings,ini,name,reader,identifier,event,variables,frozen,**kwargs):
+                    c=frozen[0]
+                    if peak==2 and c['algorithm']=='dijkstra-delay':
+                        self.assertTrue(second_finished.wait(4),'second engine did not start')
+                    folder=root/'data/runs'/identifier
+                    folder.mkdir(parents=True)
+                    (folder/'summary.json').write_text('{}')
+                    if c['algorithm']=='dijkstra-hop':second_finished.set()
+                    return {'runId':identifier}
+                with patch.object(run_manager,'prepare',side_effect=lambda base,c,*args,**kw:c), \
+                     patch.object(run_manager,'execute',side_effect=execute), \
+                     patch.object(run_manager,'host_memory',return_value=(16*run_manager.GIB,available*run_manager.GIB)), \
+                     patch.object(run_manager.os,'cpu_count',return_value=12):
+                    rid=run_manager.start(root,root,root/'omnetpp.ini','A',lambda *a,**kw:copy.deepcopy(cfg),
+                        algorithms=['dijkstra-delay','dijkstra-hop'],research={'executionMode':mode})['runId']
+                    run_manager.JOBS[rid]['thread'].join(6)
+                    state=run_manager.state(rid)
+                self.assertEqual(state['status'],'completed',state.get('error'))
+                self.assertEqual(state['peakWorkers'],peak)
+                self.assertEqual([r['algorithm'] for r in state['completedRuns']],['dijkstra-delay','dijkstra-hop'])
+                self.assertEqual(json.loads((root/'data/latest.json').read_text())['runId'],state['completedRuns'][-1]['runId'])
+
+    def test_scheduler_cancels_other_worker_on_failure_or_pressure(self):
+        import threading
+        from unittest.mock import patch
+        cfg=server.read_ini_config('Dijkstra132')
+        cfg.update(physicalEventsHash='common',physicalEvents=[],externalInputs={})
+        for pressure in (False,True):
+            with self.subTest(pressure=pressure),tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp)
+                (root/'data').mkdir()
+                pointer=root/'data/latest.json';pointer.write_text('old')
+                paired=threading.Event();stopped=threading.Event()
+                def execute(base,settings,ini,name,reader,identifier,event,variables,frozen,**kwargs):
+                    if frozen[0]['algorithm']=='dijkstra-hop':
+                        paired.set()
+                        if not pressure:raise RuntimeError('child failed')
+                    if event.wait(5):
+                        stopped.set()
+                        raise InterruptedError()
+                    raise AssertionError('worker was not stopped')
+                def memory():
+                    return 16*run_manager.GIB,0 if pressure and paired.is_set() else 8*run_manager.GIB
+                with patch.object(run_manager,'prepare',side_effect=lambda base,c,*args,**kw:c), \
+                     patch.object(run_manager,'execute',side_effect=execute), \
+                     patch.object(run_manager,'host_memory',side_effect=memory), \
+                     patch.object(run_manager,'CRITICAL_SECONDS',.05), \
+                     patch.object(run_manager.os,'cpu_count',return_value=12):
+                    rid=run_manager.start(root,root,root/'omnetpp.ini','A',lambda *a,**kw:copy.deepcopy(cfg),
+                        algorithms=['dijkstra-delay','dijkstra-hop'])['runId']
+                    run_manager.JOBS[rid]['thread'].join(6)
+                    state=run_manager.state(rid)
+                self.assertEqual(state['status'],'failed',state.get('error'))
+                self.assertTrue(paired.is_set() and stopped.is_set())
+                self.assertEqual(state['activeRuns'],[])
+                self.assertEqual(pointer.read_text(),'old')
+
     def test_group_freezes_common_events_and_preserves_result_on_cancel(self):
         import shutil,time
         from comparison import compare_bundles

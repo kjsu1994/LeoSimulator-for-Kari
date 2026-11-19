@@ -158,7 +158,27 @@ function playbackTime(time) {
   return time.toFixed(Math.min(5, Math.max(1, Math.ceil(-Math.log10(speed)))));
 }
 
+let mapZoom = 1, mapOffsetX = 0, mapOffsetY = 0, mapDrag = null;
+function mapPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  const scale = Math.min(rect.width / W, rect.height / H);
+  if (!scale) return null;
+  const x = (event.clientX - rect.left - (rect.width - W * scale) / 2) / scale;
+  const y = (event.clientY - rect.top - (rect.height - H * scale) / 2) / scale;
+  return {x,y,scale,inside:x>=0 && x<=W && y>=0 && y<=H,
+          worldX:(x-mapOffsetX)/mapZoom,worldY:(y-mapOffsetY)/mapZoom};
+}
+function moveMap(x,y) {
+  mapOffsetX = Math.max(W * (1-mapZoom), Math.min(0,x));
+  mapOffsetY = Math.max(H * (1-mapZoom), Math.min(0,y));
+  canvas.classList.toggle("zoomed",mapZoom>1);
+  tooltip.hidden = true;
+  render();
+}
+
 function render() {
+  ctx.save();
+  ctx.setTransform(mapZoom,0,0,mapZoom,mapOffsetX,mapOffsetY);
   ctx.fillStyle = "#0d2240";
   ctx.fillRect(0, 0, W, H);
   if (earthImg.complete && earthImg.naturalWidth) ctx.drawImage(earthImg, 0, 0, W, H);
@@ -288,6 +308,7 @@ function render() {
     ctx.restore();
   }
 
+  ctx.restore();
   let sumMs = 0, sumHops = 0;
   if(routes.sumsAt)[sumHops,sumMs]=routes.sumsAt(endIdx);
   else for (let i = 0; i < endIdx; i++) { sumHops += routes[i][4]; sumMs += routes[i][5]; }
@@ -435,28 +456,25 @@ document.querySelector("#routeTable tbody").onclick = e => {
 // Hover Tooltip on Map (accounts for object-fit: contain letterboxing)
 const tooltip = document.getElementById("tooltip");
 canvas.onmousemove = e => {
-  const rect = canvas.getBoundingClientRect();
-  const scale = Math.min(rect.width / W, rect.height / H);
-  if (!scale) return (tooltip.hidden = true);
-  const offX = (rect.width - W * scale) / 2, offY = (rect.height - H * scale) / 2;
-  const mx = (e.clientX - rect.left - offX) / scale, my = (e.clientY - rect.top - offY) / scale;
-  if (mx < 0 || mx > W || my < 0 || my > H) return (tooltip.hidden = true);
+  const point = mapPoint(e);
+  if (!point?.inside || mapDrag) return (tooltip.hidden = true);
+  const {worldX:mx,worldY:my} = point;
   let hit = null;
   for (const st of lastStationStates) {
-    if (Math.hypot(lonToX(st.lon) - mx, latToY(st.lat) - my) < 14) {
+    if (Math.hypot(lonToX(st.lon) - mx, latToY(st.lat) - my) < 14 / mapZoom) {
       hit = `${st.mobile ? "Mobile Terminal" : "Ground Station"} #${st.id}\n${st.name}\nLat: ${st.lat.toFixed(2)}°, Lon: ${st.lon.toFixed(2)}°`;
       break;
     }
   }
   if (!hit) {
     for (const s of lastSatStates) {
-      if (Math.hypot(lonToX(s.lon) - mx, latToY(s.lat) - my) < 10) {
+      if (Math.hypot(lonToX(s.lon) - mx, latToY(s.lat) - my) < 10 / mapZoom) {
         hit = `Satellite sat[${s.idx}] (engine snapshot)\nLat: ${s.lat.toFixed(2)}°, Lon: ${s.lon.toFixed(2)}°, Alt: ${s.alt.toFixed(0)}km`;
         break;
       }
     }
   }
-  if (hit && resultMeta?.networkEvents?.length) {const state=stateAt(simTime);for(const s of lastSatStates)if(Math.hypot(lonToX(s.lon)-mx,latToY(s.lat)-my)<10){const info=state.knowledge?.get(s.idx);if(info)hit+=`\nCSIB v${info.version} · 정보 시각 ${info.dataTime.toFixed(3)}s`;break;}}
+  if (hit && resultMeta?.networkEvents?.length) {const state=stateAt(simTime);for(const s of lastSatStates)if(Math.hypot(lonToX(s.lon)-mx,latToY(s.lat)-my)<10/mapZoom){const info=state.knowledge?.get(s.idx);if(info)hit+=`\nCSIB v${info.version} · 정보 시각 ${info.dataTime.toFixed(3)}s`;break;}}
   if (hit) {
     const wrap = canvas.parentElement.getBoundingClientRect();
     tooltip.hidden = false;
@@ -468,6 +486,35 @@ canvas.onmousemove = e => {
   }
 };
 canvas.onmouseleave = () => { tooltip.hidden = true; };
+
+canvas.addEventListener("wheel", event => {
+  const point = mapPoint(event);
+  if (!point?.inside || mapDrag || !event.deltaY) return;
+  event.preventDefault();
+  const next = Math.max(1, Math.min(8, mapZoom * (event.deltaY < 0 ? 1.25 : .8)));
+  mapZoom = Math.abs(next-1)<1e-8 ? 1 : next;
+  moveMap(point.x-point.worldX*mapZoom, point.y-point.worldY*mapZoom);
+}, {passive:false});
+canvas.addEventListener("pointerdown", event => {
+  if (event.button !== 0 || mapZoom === 1 || nativeUI.drawing) return;
+  const point = mapPoint(event);
+  if (!point?.inside) return;
+  mapDrag = {id:event.pointerId, x:event.clientX, y:event.clientY, scale:point.scale,
+             offsetX:mapOffsetX, offsetY:mapOffsetY};
+  canvas.setPointerCapture(event.pointerId);
+  canvas.classList.add("panning");
+  tooltip.hidden = true;
+});
+canvas.addEventListener("pointermove", event => {
+  const drag = mapDrag;
+  if (drag?.id !== event.pointerId) return;
+  moveMap(drag.offsetX+(event.clientX-drag.x)/drag.scale, drag.offsetY+(event.clientY-drag.y)/drag.scale);
+});
+canvas.addEventListener("lostpointercapture", event => {
+  if (mapDrag?.id !== event.pointerId) return;
+  mapDrag = null;
+  canvas.classList.remove("panning");
+});
 
 // ---- Local Backend API Integration (server.py) ----
 const runStatus = document.getElementById("runStatus");
@@ -651,10 +698,8 @@ function applyLoadedConfig(cfg, opts = {}) {
   }
 
   const active = resultMeta?.config.activeConfig || cfg.activeConfig || cfgNameSel.value;
-  const rShort = (ORBIT_CFG.routingType || "Routing").replace(/^Sat_Net_|Routing$/g, "");
   document.title = `LEO Network Simulator (${scenarioName(active)})`;
-  document.getElementById("topBadge").textContent =
-    `${scenarioName(active)} · Walker-Delta ${ORBIT_CFG.numSatellites}/${ORBIT_CFG.planes}/${ORBIT_CFG.phasing} · ${ORBIT_CFG.altitude}km · ${ORBIT_CFG.inclination}° · ${algorithmName(resultMeta?.config||cfg)}`;
+
 
   window.dispatchEvent(new CustomEvent("sim-config",{detail:cfg}));
   iniLabels=Object.fromEntries((cfg.capabilities?.fields||[]).map(f=>[f.ini,f.label]));
@@ -717,6 +762,17 @@ function showRunActivity(text, detail="", progress=null) {
   runProgress.hidden = progress === null;
   if (progress !== null) runProgress.value = progress;
 }
+function resourceWaitText(job) {
+  if (!job.resourceLimited) return "";
+  const wait = job.resourceWait;
+  if (wait?.reason === "memory") {
+    const gib = bytes => (bytes / 1073741824).toFixed(2);
+    return "메모리 여유 " + gib(wait.availableBytes) + " / 필요 " + gib(wait.requiredBytes) + " GiB";
+  }
+  if (wait?.reason === "cpu") return "논리 프로세서 4개 미만 · 한 개씩 실행";
+  if (wait?.reason === "unknown") return "메모리 확인 불가 · 한 개씩 실행";
+  return "자원 여유 확인 중";
+}
 async function runNative(algorithms=null,research=null) {
   if(runActivity.classList.contains("running"))return;
   if(configSaving||configLoading)return setStatus("설정을 반영하고 있습니다. 잠시 후 실행하세요.");
@@ -728,7 +784,13 @@ async function runNative(algorithms=null,research=null) {
   const settingsControls=["cfgName","algorithmChoice","btnSettings","btnOpenIni","btnRefreshIni","showAllConfigs"].map(id=>document.getElementById(id)),settingsStates=settingsControls.map(e=>e.disabled);settingsControls.forEach(e=>e.disabled=true);
   try {
     let response=await fetch(algorithms?"/api/experiments":"/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfgNameSel.value,...(algorithms?{algorithms,research}:{})})});
-    let data=await response.json();if(!response.ok)throw Error(data.error||"실행하지 못했습니다.");
+    let data=await response.json();
+    if (!response.ok) {
+      if (algorithms && data.error === "Invalid research options") {
+        throw Error("현재 실행 중인 프로그램이 이전 버전입니다. 최신 배포 폴더의 sim-ui.exe를 다시 실행하세요.");
+      }
+      throw Error(data.error || "실행하지 못했습니다.");
+    }
     activeJob=data.runId;
     stop.disabled=false;
     for(;;){
@@ -741,11 +803,15 @@ async function runNative(algorithms=null,research=null) {
       if (job.status === "stopping") { showRunActivity("계산을 중지하는 중…"); continue; }
       const completed = job.completedRuns?.length || 0;
       const total = job.totalRuns || 1;
-      const p = job.completedRuns?.some(r => r.runId === job.currentRunId) ? null : job.progress;
-      const fraction = p ? (completed + p.progress) / total : null;
-      const detail = [algorithms ? "완료 " + completed + " / " + total : "", fraction !== null ? Math.round(fraction * 100) + "%" : ""].filter(Boolean).join(" · ");
-      showRunActivity(operation + (p ? " 계산 중…" : " 준비 중…"), detail, fraction);
-      setStatus(p?`계산 중 ${job.completedRuns?.length||0} / ${job.totalRuns||1} · ${Math.round(p.progress*100)}% · ${p.time.toFixed(1)} / ${p.limit}s · 수신 ${p.received.toLocaleString()}`:"계산 준비 중…");
+      const running = job.activeRuns || [];
+      const samples = Array.isArray(job.activeRuns) ? running.map(run => run.progress).filter(Boolean) : [job.progress].filter(Boolean);
+      const fraction = completed || samples.length ? (completed + samples.reduce((sum, p) => sum + p.progress, 0)) / total : null;
+      const detail = [algorithms ? "완료 " + completed + " / " + total : "",
+        algorithms && running.length ? "동시 실행 " + running.length + "개" : "",
+        resourceWaitText(job),
+        fraction !== null ? Math.round(fraction * 100) + "%" : ""].filter(Boolean).join(" · ");
+      showRunActivity(operation + (samples.length || running.length ? " 계산 중…" : " 준비 중…"), detail, fraction);
+      setStatus(operation + (detail ? " · " + detail : " 준비 중…"));
     }
   }catch(error){setStatus(`실행 오류: ${error.message}`);}
   finally {settingsControls.forEach((e,i)=>e.disabled=settingsStates[i]);activeJob=null;btn.disabled=false;compare.disabled=false;stop.hidden=true;runActivity.classList.remove("running");showRunActivity(runStatus.textContent);}

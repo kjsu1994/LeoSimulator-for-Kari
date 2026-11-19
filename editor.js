@@ -332,8 +332,8 @@ byId("settingsForm").onsubmit=async event=>{
     applyLoadedConfig(result,{announce:true});byId("settingsDialog").close();setStatus("INI에 저장했습니다. 실행하면 새 설정이 적용됩니다.");
   }catch(e){byId("settingsError").textContent=e.message;}finally{save.disabled=false;}
 };
-function mapCoordinates(e){const r=canvas.getBoundingClientRect(),scale=Math.min(r.width/W,r.height/H),x=(e.clientX-r.left-(r.width-W*scale)/2)/scale,y=(e.clientY-r.top-(r.height-H*scale)/2)/scale;return {lat:Math.max(-90,Math.min(90,90-y/H*180)),lon:Math.max(-180,Math.min(180,x/W*360-180))};}
-canvas.addEventListener("pointerdown",e=>{if(nativeUI.drawing){nativeUI.drawing.start=mapCoordinates(e);canvas.setPointerCapture(e.pointerId);}});
+function mapCoordinates(e){const p=mapPoint(e);return {lat:Math.max(-90,Math.min(90,90-p.worldY/H*180)),lon:Math.max(-180,Math.min(180,p.worldX/W*360-180))};}
+canvas.addEventListener("pointerdown",e=>{if(nativeUI.drawing&&e.button===0&&mapPoint(e)?.inside){nativeUI.drawing.start=mapCoordinates(e);canvas.setPointerCapture(e.pointerId);}});
 canvas.addEventListener("pointerup",e=>{const d=nativeUI.drawing;if(!d?.start)return;const end=mapCoordinates(e);nativeUI.drawing=null;
   if(d.shape==="rect"){const lons=[d.start.lon,end.lon];byId("target-lat_min").value=Math.min(d.start.lat,end.lat);byId("target-lat_max").value=Math.max(d.start.lat,end.lat);byId("target-lon_min").value=Math.abs(lons[0]-lons[1])>180?Math.max(...lons):Math.min(...lons);byId("target-lon_max").value=Math.abs(lons[0]-lons[1])>180?Math.min(...lons):Math.max(...lons);}
   else {const rad=Math.PI/180,a=d.start.lat*rad,b=end.lat*rad,h=Math.sin((b-a)/2)**2+Math.cos(a)*Math.cos(b)*Math.sin((end.lon-d.start.lon)*rad/2)**2;byId("target-center_lat").value=d.start.lat;byId("target-center_lon").value=d.start.lon;byId("target-radius_km").value=Math.max(1,6371.0088*2*Math.asin(Math.min(1,Math.sqrt(h))));}
@@ -380,6 +380,10 @@ function drawMetrics(){
 byId("metricSeries").onchange=drawMetrics;byId("metricFlow").onchange=drawMetrics;
 window.addEventListener("sim-result",e=>showMetrics(e.detail));window.addEventListener("sim-clear",()=>showMetrics(null));
 const comparisonInputs={};
+function hostExecutionLabel(host) {
+  if (!host) return "기록 없음";
+  return host.mode === "auto" ? "자동 · 동시 " + host.workers + "개" : "순차";
+}
 function showComparison(a,b){
   byId("singleComparisonControls").hidden=false;
   const sa=offered(a.summary),sb=offered(b.summary);const ca=a.config,cb=b.config;
@@ -387,8 +391,15 @@ function showComparison(a,b){
   const sameTraffic=sa.trafficHash===sb.trafficHash,ha=a.manifest.environmentHash,hb=b.manifest.environmentHash;
   byId("comparisonStatus").textContent=(verified&&ha&&ha===hb&&sameTraffic)?"동일한 환경·송신 조건입니다.":sameTraffic?"송신 조건은 동일합니다. 환경 설정 차이를 확인하세요.":"송신 조건이 다릅니다.";
   const content=byId("comparisonContent");content.replaceChildren();const table=node("table"),head=table.createTHead().insertRow();for(const t of ["지표",`${sa.algorithm} (기준)`,`${sb.algorithm} (비교)`,"차이"])head.append(node("th",{},t));
-  const body=table.createTBody();for(const key of Object.keys(metricLabels)){const av=measured(sa,key),bv=measured(sb,key),row=body.insertRow();for(const text of [metricLabels[key],metricText(av),metricText(bv),av==null||bv==null?"—":metricText(bv-av)])row.insertCell().textContent=text;}
+  const body=table.createTBody();
+  if (sa.hostExecution || sb.hostExecution) {
+    const row=body.insertRow();
+    for(const text of ["실행 방식",hostExecutionLabel(sa.hostExecution),hostExecutionLabel(sb.hostExecution),"—"]) row.insertCell().textContent=text;
+  }
+  const serialTiming=[sa,sb].every(summary => !summary.hostExecution || summary.hostExecution.mode==="sequential");
+  for(const key of Object.keys(metricLabels)){const av=measured(sa,key),bv=measured(sb,key),row=body.insertRow();for(const text of [metricLabels[key],metricText(av),metricText(bv),av==null||bv==null||(key==="elapsedSeconds"&&!serialTiming)?"—":metricText(bv-av)])row.insertCell().textContent=text;}
   content.append(table);
+  if (!serialTiming) content.append(node("p",{class:"quiet"},"자동 실행의 경과 시간에는 다른 실행과의 자원 경합이 반영될 수 있습니다."));
   const settings=node("details");settings.append(node("summary",{},"알고리즘 설정 차이"));for(const key of new Set([...Object.keys(a.manifest.algorithmSettings||{}),...Object.keys(b.manifest.algorithmSettings||{})])){const av=a.manifest.algorithmSettings?.[key],bv=b.manifest.algorithmSettings?.[key];if(av!==bv)settings.append(node("p",{class:"quiet"},`${key}: ${av??"—"} → ${bv??"—"}`));}content.append(settings);
   const capture=node("button",{type:"button"},"기준 경로를 혼잡 설정에 사용");capture.onclick=()=>{const route=a.routes[0];if(!route){byId("comparisonStatus").textContent="기준 결과에 경로가 없습니다.";return;}nativeUI.baseline={runId:a.runId,route:route[6],time:route[0]};byId("comparisonStatus").textContent=`기준 경로 ${route[6].join(" → ")} 선택됨`;render();};content.append(capture);
 }
@@ -465,6 +476,12 @@ function showResearchMetrics(s){
   }
   byId("nativeMetrics").append(detail);
 }
-byId("btnExperiment").onclick=async()=>{try{const response=await fetch(`/api/config?config=${encodeURIComponent(cfgNameSel.value)}`),cfg=await response.json();if(!response.ok)throw Error(cfg.error);const area=byId("experimentAlgorithms");area.replaceChildren();for(const [id,label]of Object.entries(cfg.capabilities.algorithms)){const e=node("label",{class:"check-field"});e.append(node("input",{type:"checkbox",class:"experiment-algorithm",value:id,checked:true}),document.createTextNode(algorithmName({algorithm:id})));area.append(e);}byId("experimentForm").dataset.limit=cfg.simTimeLimit;byId("experimentForm").dataset.processing=cfg.processingMode;byId("experimentRepetitions").value="1";byId("experimentSeed").value=cfg.seed;byId("experimentWarmup").value=cfg.warmupSeconds||0;byId("experimentDrain").value=cfg.drainSeconds||0;byId("experimentConditions").textContent=`${scenarioName(cfg.activeConfig)} · ${cfg.simTimeLimit}s · 시드 ${cfg.seed}`;byId("experimentError").textContent="";byId("experimentDialog").showModal();}catch(e){setStatus(e.message);}};
-byId("experimentForm").onsubmit=e=>{e.preventDefault();const selected=[...document.querySelectorAll(".experiment-algorithm:checked")].map(e=>e.value);if(!selected.length){byId("experimentError").textContent="알고리즘을 선택하세요.";return;}const research={repetitions:Number(value("experimentRepetitions")),seedStart:Number(value("experimentSeed")),warmupSeconds:Number(value("experimentWarmup")),drainSeconds:Number(value("experimentDrain"))};if(research.warmupSeconds+research.drainSeconds>=Number(byId("experimentForm").dataset.limit)){byId("experimentError").textContent="준비·종료 관측 구간의 합은 실행 시간보다 짧아야 합니다.";return;}if(research.repetitions>1&&byId("experimentForm").dataset.processing!=="neutral"){byId("experimentError").textContent="반복 비교는 고급 설정의 처리 지연을 ‘추가 지연 없음’으로 선택한 뒤 실행하세요.";return;}byId("experimentDialog").close();runNative(selected,research);};
+const experimentTotal = byId("experimentTotal");
+function updateExperimentTotal() {
+  const count = document.querySelectorAll(".experiment-algorithm:checked").length;
+  experimentTotal.textContent = "총 " + (count * Number(value("experimentRepetitions"))) + "회 실행";
+}
+byId("experimentAlgorithms").onchange = byId("experimentRepetitions").onchange = updateExperimentTotal;
+byId("btnExperiment").onclick=async()=>{try{const response=await fetch(`/api/config?config=${encodeURIComponent(cfgNameSel.value)}`),cfg=await response.json();if(!response.ok)throw Error(cfg.error);if(!cfg.capabilities?.comparisonExecutionModes?.includes("auto"))throw Error("현재 실행 중인 프로그램은 자동 비교를 지원하지 않습니다. 프로그램을 종료한 뒤 최신 배포 폴더의 sim-ui.exe를 실행하세요.");const area=byId("experimentAlgorithms");area.replaceChildren();for(const [id,label]of Object.entries(cfg.capabilities.algorithms)){const e=node("label",{class:"check-field"});e.append(node("input",{type:"checkbox",class:"experiment-algorithm",value:id,checked:true}),document.createTextNode(algorithmName({algorithm:id})));area.append(e);}byId("experimentForm").dataset.limit=cfg.simTimeLimit;byId("experimentForm").dataset.processing=cfg.processingMode;byId("experimentRepetitions").value="1";byId("experimentExecution").value="auto";updateExperimentTotal();byId("experimentSeed").value=cfg.seed;byId("experimentWarmup").value=cfg.warmupSeconds||0;byId("experimentDrain").value=cfg.drainSeconds||0;byId("experimentConditions").textContent=`${scenarioName(cfg.activeConfig)} · ${cfg.simTimeLimit}s · 시드 ${cfg.seed}`;byId("experimentError").textContent="";byId("experimentDialog").showModal();}catch(e){setStatus(e.message);}};
+byId("experimentForm").onsubmit=e=>{e.preventDefault();const selected=[...document.querySelectorAll(".experiment-algorithm:checked")].map(e=>e.value);if(!selected.length){byId("experimentError").textContent="알고리즘을 선택하세요.";return;}const research={executionMode:value("experimentExecution"),repetitions:Number(value("experimentRepetitions")),seedStart:Number(value("experimentSeed")),warmupSeconds:Number(value("experimentWarmup")),drainSeconds:Number(value("experimentDrain"))};if(research.warmupSeconds+research.drainSeconds>=Number(byId("experimentForm").dataset.limit)){byId("experimentError").textContent="준비·종료 관측 구간의 합은 실행 시간보다 짧아야 합니다.";return;}if(research.repetitions>1&&byId("experimentForm").dataset.processing!=="neutral"){byId("experimentError").textContent="반복 비교는 고급 설정의 처리 지연을 ‘추가 지연 없음’으로 선택한 뒤 실행하세요.";return;}byId("experimentDialog").close();runNative(selected,research);};
 if(location.protocol==="file:")byId("btnExperiment").hidden=true;

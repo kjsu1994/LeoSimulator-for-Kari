@@ -97,9 +97,11 @@ class ValidationTests(unittest.TestCase):
             try:
                 url=f'http://127.0.0.1:{httpd.server_port}'
                 with urllib.request.urlopen(url+'/api/experiments') as response:self.assertEqual(json.load(response),[manifest])
+                with urllib.request.urlopen(url+'/api/config?config=Dijkstra132') as response:
+                    self.assertEqual(json.load(response)['capabilities']['comparisonExecutionModes'],['auto','sequential'])
                 with urllib.request.urlopen(url+'/api/experiments/verification-1234') as response:self.assertEqual(json.load(response),report)
                 with patch.object(run_manager,'start',return_value={'ok':True}) as start:
-                    options={'repetitions':10,'seedStart':7};request=urllib.request.Request(url+'/api/experiments',data=json.dumps({'configName':'A','algorithms':['mcsr-ls'],'research':options}).encode(),headers={'Content-Type':'application/json'})
+                    options={'repetitions':10,'seedStart':7,'executionMode':'auto'};request=urllib.request.Request(url+'/api/experiments',data=json.dumps({'configName':'A','algorithms':['mcsr-ls'],'research':options}).encode(),headers={'Content-Type':'application/json'})
                     with urllib.request.urlopen(request) as response:self.assertEqual(response.status,202)
                     self.assertEqual(start.call_args.args[-1],options)
                 manifest['status']='cancelled';(p/'manifest.json').write_text(json.dumps(manifest))

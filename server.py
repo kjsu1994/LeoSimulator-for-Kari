@@ -241,13 +241,15 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
             qs = urllib.parse.parse_qs(parsed.query)
             cfg_name = qs.get("config", [None])[0]
             try:
-                from run_manager import load_external_inputs
+                from run_manager import EXECUTION_MODES, load_external_inputs
                 if qs.get("defaults")==["1"]:
                     from config_editor import preview_defaults
                     from run_manager import CONFIG_LOCK
                     with CONFIG_LOCK:
                         return self.send_json(preview_defaults(INI_PATH,cfg_name))
-                return self.send_json(load_external_inputs(read_ini_config(cfg_name), INI_PATH))
+                cfg = load_external_inputs(read_ini_config(cfg_name), INI_PATH)
+                cfg['capabilities']['comparisonExecutionModes'] = EXECUTION_MODES
+                return self.send_json(cfg)
             except (ValueError, OSError) as exc:
                 return self.send_json({"error": str(exc)}, 400)
         if parsed.path == "/api/result":
