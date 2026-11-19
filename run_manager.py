@@ -126,7 +126,10 @@ def prepare(base,cfg,cancel=None):
     kernel=hashlib.sha256((Path(base)/'engine/engine.exe').read_bytes()).hexdigest()
     if cfg.get('commonKernelHash') not in (None,kernel):raise ValueError('Engine changed during experiment')
     cfg=copy.deepcopy(cfg);cfg['commonKernelHash']=kernel
-    if cfg.get('physicalPrepared'):return cfg
+    if cfg.get('physicalPrepared'):
+        cfg['physicalEventsHash']=hashlib.sha256(json.dumps(cfg['physicalEvents'],sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        if cfg.get('commonSrd'):cfg['commonSrdHash']=hashlib.sha256(json.dumps(cfg['commonSrd'],sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        return cfg
     cancel=cancel or threading.Event()
     with tempfile.TemporaryDirectory(prefix='leo-physical-') as tmp:
         folder=Path(tmp);file=folder/'input.json';file.write_text(json.dumps(cfg,ensure_ascii=False,allow_nan=False),encoding='utf-8')
@@ -178,7 +181,8 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
                 except subprocess.TimeoutExpired:process.kill();process.wait(timeout=1)
     if cancel.is_set():raise InterruptedError('실행을 중지했습니다.')
     if process.returncode:raise RuntimeError((folder/'run.log').read_text(encoding='utf-8',errors='replace')[-4000:])
-    summary=json.loads((folder/'summary.json').read_text());summary['elapsedSeconds']=time.monotonic()-start;summary['peakMemoryBytes']=peak
+    from research import evidence
+    summary=json.loads((folder/'summary.json').read_text());summary['validation']=evidence(base);summary['elapsedSeconds']=time.monotonic()-start;summary['peakMemoryBytes']=peak
     (folder/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,allow_nan=False,indent=2),encoding='utf-8')
     profile=json.loads((base/'replay-model.json').read_text(encoding='utf-8'))
     bundle,payload=make_native_bundle(inputs,folder,config_name,profile['modelHash'],cfg,run_id,entry=Path(ini).relative_to(settings).as_posix())
@@ -195,36 +199,73 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
     pointer=base/'data/latest.json';tmp=pointer.with_suffix('.tmp');tmp.write_text(json.dumps({'runId':run_id}),encoding='utf-8');os.replace(tmp,pointer)
     return result
 
-def start(base,settings,ini,name,read_config,variables=None,algorithms=None):
+def start(base,settings,ini,name,read_config,variables=None,algorithms=None,research=None):
     # Validate before accepting the job; a rejected request creates no run folder.
     with CONFIG_LOCK:
         cfg=load_external_inputs(read_config(name,variables=variables),ini)
         inputs={p.relative_to(settings).as_posix():p.read_bytes() for p in Path(settings).rglob('*.ini') if not p.name.startswith('.')}
     from native_engine import ALGORITHMS
     if algorithms is not None and (not isinstance(algorithms,list) or not algorithms or len(set(algorithms))!=len(algorithms) or any(a not in ALGORITHMS for a in algorithms)):raise ValueError('Select valid algorithms')
+    options={} if research is None else research
+    if not isinstance(options,dict) or set(options)-{'repetitions','seedStart','warmupSeconds','drainSeconds'}:raise ValueError('Invalid research options')
+    repetitions=options.get('repetitions',1);seed_start=options.get('seedStart',cfg['seed'])
+    if type(repetitions)!=int or not 1<=repetitions<=100 or type(seed_start)!=int or not 0<=seed_start<=2147483647-repetitions+1:raise ValueError('Invalid repetition count/seed')
+    if repetitions>1 and (not algorithms or cfg['processingMode']!='neutral'):raise ValueError('Repeated comparisons require neutral processing and algorithms')
+    for key in ('warmupSeconds','drainSeconds'):
+        value=options.get(key,cfg.get(key,0))
+        if type(value) not in (int,float) or not math.isfinite(value) or value<0:raise ValueError('Invalid '+key)
+        cfg[key]=value
+    if cfg['warmupSeconds']+cfg['drainSeconds']>=cfg['simTimeLimit']:raise ValueError('Measurement window is empty')
+    seeds=[seed_start+i for i in range(repetitions)]
     with LOCK:
         if any(j['status'] in ('queued','running','stopping') for j in JOBS.values()):raise ValueError('다른 계산이 실행 중입니다.')
         run_id=new_id();event=threading.Event();job={'runId':run_id,'status':'queued','cancel':event,'base':str(base)};JOBS[run_id]=job
     def work():
         job['status']='running';job['phase']='preparing';job['started']=time.monotonic();job['completedRuns']=[]
-        try:
-            common=prepare(base,cfg,event);common['experimentId']=run_id
-            folder=Path(base)/'data/experiments'/run_id;folder.mkdir(parents=True,exist_ok=False)
-            (folder/'common.json').write_text(json.dumps(common,ensure_ascii=False,allow_nan=False,indent=2),encoding='utf-8')
-            (folder/'physical-events.json').write_text(json.dumps(common['physicalEvents'],indent=2),encoding='utf-8')
-            if common.get('commonSrd'):(folder/'common-srd.json').write_text(json.dumps(common['commonSrd'],indent=2),encoding='utf-8')
-            job['phase']='running';selected=algorithms or [common['algorithm']];job['totalRuns']=len(selected)
-            for algorithm in selected:
-                if event.is_set():raise InterruptedError('실행을 중지했습니다.')
-                child=copy.deepcopy(common);child['algorithm']=algorithm;child['routingType']='Sat_Net_McsrRouting' if algorithm.startswith('mcsr-') else 'Sat_Net_DijkstraRouting';child['metric']='hop' if algorithm=='dijkstra-hop' else 'delay'
-                child_id=new_id() if algorithms is not None else run_id;job['currentRunId']=child_id
-                result=execute(base,settings,ini,name,read_config,child_id,event,variables,(child,inputs))
-                job['completedRuns'].append({'runId':child_id,'algorithm':algorithm})
-            manifest={'experimentId':run_id,'physicalEventsHash':common['physicalEventsHash'],'commonSrdHash':common.get('commonSrdHash'),'runs':job['completedRuns']}
+        folder=Path(base)/'data/experiments'/run_id
+        selected=algorithms or [cfg['algorithm']];job['totalRuns']=len(selected)*len(seeds)
+        manifest={'schema':2,'experimentId':run_id,'configName':name,'seeds':seeds,'algorithms':selected,'runs':job['completedRuns'],'status':'running'}
+        records=[]
+        def save_manifest():
             (folder/'manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
-            job['status']='completed';job['result']=manifest if algorithms is not None else result
-        except InterruptedError as e:job.update(status='cancelled',error=str(e))
-        except Exception as e:job.update(status='failed',error=str(e))
+        try:
+            folder.mkdir(parents=True,exist_ok=False)
+            for index,seed in enumerate(seeds):
+                if event.is_set():raise InterruptedError('실행을 중지했습니다.')
+                seed_config=copy.deepcopy(cfg);seed_config['seed']=seed;seed_config['failureSeed']=(cfg['failureSeed']+index)%2147483648
+                common=prepare(base,seed_config,event);common['experimentId']=run_id
+                prefix='' if index==0 else f'seed-{seed}-'
+                for filename,data in [('common.json',common),('physical-events.json',common['physicalEvents']),('common-srd.json',common.get('commonSrd'))]:
+                    if data is not None:(folder/(prefix+filename)).write_text(json.dumps(data,ensure_ascii=False,allow_nan=False,indent=2),encoding='utf8')
+                if index==0:manifest.update(physicalEventsHash=common['physicalEventsHash'],commonSrdHash=common.get('commonSrdHash'))
+                job['phase']='running';save_manifest()
+                order=selected[index%len(selected):]+selected[:index%len(selected)]
+                for algorithm in order:
+                    if event.is_set():raise InterruptedError('실행을 중지했습니다.')
+                    child=copy.deepcopy(common);child['algorithm']=algorithm;child['routingType']='Sat_Net_McsrRouting' if algorithm.startswith('mcsr-') else 'Sat_Net_DijkstraRouting';child['metric']='hop' if algorithm=='dijkstra-hop' else 'delay'
+                    child_id=new_id() if algorithms is not None else run_id;job['currentRunId']=child_id;job['currentSeed']=seed
+                    result=execute(base,settings,ini,name,read_config,child_id,event,variables,(child,inputs))
+                    job['completedRuns'].append({'runId':child_id,'algorithm':algorithm,'seed':seed})
+                    summary=json.loads((Path(base)/'data/runs'/child_id/'summary.json').read_text(encoding='utf8'))
+                    records.append({'seed':seed,'algorithm':algorithm,'config':child,'summary':summary});save_manifest()
+            if event.is_set():raise InterruptedError('실행을 중지했습니다.')
+            if repetitions>1:
+                from research import aggregate
+                statistics=aggregate(records,selected,seeds);statistics['experimentId']=run_id
+                (folder/'statistics.json').write_text(json.dumps(statistics,ensure_ascii=False,allow_nan=False,indent=2),encoding='utf8')
+                manifest['statistics']='statistics.json';job['statistics']=statistics
+            with LOCK:
+                if event.is_set():raise InterruptedError('실행을 중지했습니다.')
+                manifest['status']='completed';save_manifest()
+                job['result']=manifest if algorithms is not None else result;job['status']='completed'
+        except InterruptedError as e:
+            job.update(status='cancelled',error=str(e));manifest.update(status='cancelled',error=str(e))
+            try:save_manifest()
+            except OSError:pass
+        except Exception as e:
+            job.update(status='failed',error=str(e));manifest.update(status='failed',error=str(e))
+            try:save_manifest()
+            except OSError:pass
     thread=threading.Thread(target=work,daemon=True);job['thread']=thread;thread.start()
     return {'ok':True,'runId':run_id,'status':'queued'}
 
@@ -238,9 +279,10 @@ def state(run_id):
     return out
 
 def cancel(run_id):
-    with LOCK:job=JOBS.get(run_id)
-    if not job:raise ValueError('알 수 없는 실행입니다.')
-    if job['status'] in ('queued','running'):job['status']='stopping';job['cancel'].set()
+    with LOCK:
+        job=JOBS.get(run_id)
+        if not job:raise ValueError('알 수 없는 실행입니다.')
+        if job['status'] in ('queued','running'):job['status']='stopping';job['cancel'].set()
     return {'ok':True,'runId':run_id,'status':job['status']}
 
 def shutdown():

@@ -50,6 +50,10 @@ def main():
                     str(ROOT / "sim-ui.spec")], check=True, cwd=ROOT)
     name = "LEO-Network-Simulator-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
     delivery = stage(ROOT / "dist" / name, binaries / "sim-ui.exe")
+    from research import evidence
+    record=evidence(ROOT)
+    if record['status']=='passed':
+        source=ROOT/record['report'];shutil.copytree(source.parent,delivery/source.parent.relative_to(ROOT))
     import server
     with patch.object(server, "BASE_DIR", str(delivery)), patch.object(server, "LEO_DIR", str(delivery / "settings")), patch.object(server, "INI_PATH", str(delivery / "settings" / server.ENTRY)):
         server.run_simulation("Dijkstra132")

@@ -112,7 +112,7 @@ def make_native_bundle(inputs, directory, config_name, model_hash, config, run_i
 
     if config.get('scenario'):files['scenario.json']=json.dumps(config['scenario'],ensure_ascii=False,allow_nan=False).encode('utf-8')
     m=bundle['manifest'];m.update(format='leo-native-replay-v4',profile='leo-native-delta-v4',orbitModelHash=model_hash,
-                                normalizedPath='normalized.json',engine={'id':'leo-native','version':'4.0.0'})
+                                normalizedPath='normalized.json',engine={'id':'leo-native','version':json.loads((directory/'summary.json').read_text(encoding='utf8')).get('version','4.0.0')})
     if config.get('packetTrace'):
         h=hashlib.sha256()
         with (directory/'events.csv').open('rb') as stream:

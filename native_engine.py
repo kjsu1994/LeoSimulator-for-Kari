@@ -204,7 +204,11 @@ def configuration(cfg):
     if not 64<=c['controlMtu']<=65535 or int(c['controlMtu'])!=c['controlMtu']:raise ValueError('Invalid control MTU')
     c['islScheduleFile']=string('LeoDijkstra.native.islScheduleFile','')
     c['failureRouteSrc']=int(num('LeoDijkstra.mapDataSource.failureRouteSrc',-1));c['failureRouteDst']=int(num('LeoDijkstra.mapDataSource.failureRouteDst',-1))
-    c['modelVersion']='leo-research-4';c['metricVersion']=4;c['controlProtocolVersion']=2
+    for key in ('warmupSeconds','drainSeconds'):
+        c[key]=num('LeoDijkstra.native.'+key,0)
+        if c[key]<0:raise ValueError('Invalid '+key)
+    if c['warmupSeconds']+c['drainSeconds']>=c['simTimeLimit']:raise ValueError('Measurement window is empty')
+    c['modelVersion']='leo-research-4.1';c['metricVersion']=4;c['controlProtocolVersion']=2
     c['variables']=variables;c['capabilities']=capabilities();c['normalizedVersion']=4
     c['sweeps']={name:[number(x) for x in values.split(',')] for entry in entries for name,values in re.findall(r'\$\{(\w+)=([^}]+)\}',entry['v'])}
     return c

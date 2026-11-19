@@ -634,20 +634,20 @@ document.getElementById("btnOpenIni").onclick = async () => {
 };
 
 let activeJob=null;
-async function runNative(algorithms=null) {
+async function runNative(algorithms=null,research=null) {
   if(configSaving||configLoading)return setStatus("설정을 반영하고 있습니다. 잠시 후 실행하세요.");
   if(!location.protocol.startsWith("http"))return setStatus("새 계산은 sim-ui.exe에서 실행하세요.");
   const btn=document.getElementById("btnRunSim"),compare=document.getElementById("btnExperiment"),stop=document.getElementById("btnStopSim");btn.disabled=true;compare.disabled=true;stop.hidden=false;
   const settingsControls=["cfgName","algorithmChoice","btnSettings","btnOpenIni","btnRefreshIni","showAllConfigs"].map(id=>document.getElementById(id)),settingsStates=settingsControls.map(e=>e.disabled);settingsControls.forEach(e=>e.disabled=true);
   try {
-    let response=await fetch(algorithms?"/api/experiments":"/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfgNameSel.value,...(algorithms?{algorithms}:{})})});
+    let response=await fetch(algorithms?"/api/experiments":"/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({configName:cfgNameSel.value,...(algorithms?{algorithms,research}:{})})});
     let data=await response.json();if(!response.ok)throw Error(data.error||"실행하지 못했습니다.");
     activeJob=data.runId;
     for(;;){
       await new Promise(resolve=>setTimeout(resolve,500));
       const job=await fetch(`/api/run/${activeJob}`,{cache:"no-store"}).then(r=>r.json());
       if(job.error&&job.status!=="cancelled")throw Error(job.error);
-      if(job.status==="completed"){if(algorithms){const latest=job.completedRuns.at(-1);const result=await fetch(`/api/result?runId=${encodeURIComponent(latest.runId)}&metadata=1`).then(r=>r.json());await openResultBundle(result.bundle);document.getElementById("btnCompare").click();setStatus(`비교 실행 완료 · ${job.completedRuns.length}개`);}else{const result=await fetch(`/api/result?runId=${encodeURIComponent(job.runId)}&metadata=1`).then(r=>r.json());await openResultBundle(result.bundle);setStatus(`계산 완료 · ${job.runId}`);}break;}
+      if(job.status==="completed"){if(algorithms){const latest=job.completedRuns.at(-1);const result=await fetch(`/api/result?runId=${encodeURIComponent(latest.runId)}&metadata=1`).then(r=>r.json());await openResultBundle(result.bundle);if(job.statistics)showExperimentStatistics(job.statistics);else document.getElementById("btnCompare").click();setStatus(`비교 실행 완료 · ${job.completedRuns.length}개`);}else{const result=await fetch(`/api/result?runId=${encodeURIComponent(job.runId)}&metadata=1`).then(r=>r.json());await openResultBundle(result.bundle);setStatus(`계산 완료 · ${job.runId}`);}break;}
       if(job.status==="cancelled"){setStatus("계산을 중지했습니다. 이전 결과를 유지합니다.");break;}
       if(job.status==="failed")throw Error(job.error||"계산 실패");
       const p=job.progress;setStatus(p?`계산 중 ${job.completedRuns?.length||0} / ${job.totalRuns||1} · ${Math.round(p.progress*100)}% · ${p.time.toFixed(1)} / ${p.limit}s · 수신 ${p.received.toLocaleString()}`:"계산 준비 중…");

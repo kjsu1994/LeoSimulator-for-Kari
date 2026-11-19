@@ -63,3 +63,11 @@ Context.graph(viewer)는 실제 전달된 광고만 반영하며 궤도 기반 �
 발생 = 수신 + 실패 + 전송 중, sent = 발생 - 접속/초기경로 실패입니다.
 데이터와 제어 직렬화 중 단절은 폐기하고 이미 전파 중인 프레임은 도착할 수 있습니다.
 algorithm operations는 원본 OpScope와 Dijkstra의 대응 카운터를 사용합니다.
+
+## 연구 검증 확장 (4.1.0)
+
+원본 MCSR 헤더는 유지합니다. `tests/oracle_driver.cpp`는 입력 그래프에 대한 실제 코어 결과를 내보내며, `verify_oracle.py`는 제품의 계산 함수를 재사용하지 않고 경로를 열거해 비교합니다. `tests/test_kernel.cpp`는 시험 빌드에서만 노출한 패킷 커널을 사용해 직렬화·FIFO·큐 초과·장애 시각 순서·종료 관측과 비대칭 Dijkstra 비용을 확인합니다. 일반 실행 파일에 시험용 설정이나 공개 API를 추가하지 않습니다.
+
+`warmupSeconds`·`drainSeconds`가 모두 0이면 기존 계측을 유지합니다. 측정 코호트는 별도 `measurement` 하위 형식으로 기록합니다. `OpCounts::each`로 전체 연산 계측과 라벨 제한 횟수를 내보냅니다. Dijkstra는 목적지 기준 역방향 탐색에 역방향 인접 목록을 전달합니다. 이 변경은 방향별 지연이 다른 경우의 비용 계산을 수정하며 엔진·모델 버전으로 구분합니다.
+
+전체 검증 명령은 루트 `verify_research.py`입니다. 이력은 `data/validation/`에 남고 사용자 `data/runs`와 분리합니다. 기본 실행에는 상세 추적이나 반복 실험을 강제하지 않습니다.

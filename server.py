@@ -201,6 +201,24 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        parsed=urllib.parse.urlparse(self.path)
+        if parsed.path=='/api/experiments':
+            rows=[]
+            for path in sorted((Path(BASE_DIR)/'data/experiments').glob('*/manifest.json'),reverse=True):
+                try:
+                    m=json.loads(path.read_text(encoding='utf8'))
+                    if m.get('statistics') and m.get('status')=='completed':rows.append(m)
+                except (OSError,ValueError):continue
+            return self.send_json(rows)
+        if parsed.path.startswith('/api/experiments/'):
+            try:
+                from comparison import folder
+                run_id=parsed.path.rsplit('/',1)[-1];folder(BASE_DIR,run_id)
+                manifest=json.loads((Path(BASE_DIR)/'data/experiments'/run_id/'manifest.json').read_text(encoding='utf8'))
+                if manifest.get('status')!='completed':raise ValueError('Incomplete experiment')
+                return self.send_json(json.loads((Path(BASE_DIR)/'data/experiments'/run_id/'statistics.json').read_text(encoding='utf8')))
+            except (ValueError,OSError):return self.send_json({'error':'반복 실험 결과가 없습니다.'},404)
+
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/runs":
             from comparison import runs
@@ -278,7 +296,7 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
                 if self.path=="/api/experiments" and body.get("algorithms") is None:raise ValueError("Select algorithms")
                 from run_manager import start
                 name=body.get("configName") or read_ini_config()["activeConfig"]
-                return self.send_json(start(BASE_DIR,LEO_DIR,INI_PATH,name,read_ini_config,body.get("variables"),body.get("algorithms") if self.path=="/api/experiments" else None),202)
+                return self.send_json(start(BASE_DIR,LEO_DIR,INI_PATH,name,read_ini_config,body.get("variables"),body.get("algorithms") if self.path=="/api/experiments" else None,body.get("research")),202)
             except (ValueError,OSError,KeyError) as exc:
                 return self.send_json({"ok":False,"error":str(exc)},400)
         if self.path.startswith("/api/run/") and self.path.endswith("/cancel"):

@@ -38,3 +38,6 @@ data/latest_result.js
 
 # Keep the relocatable build recipe
 !sim-ui.spec
+
+# Persistent local validation evidence
+data/validation/

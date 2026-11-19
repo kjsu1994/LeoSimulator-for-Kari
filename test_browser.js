@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
 const { spawn } = require("node:child_process");
 const delay = ms => new Promise(r => setTimeout(r, ms));
-async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { return await fn(); } catch { await delay(250); } } throw new Error("Startup timeout"); }
+async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { return await fn(); } catch { await delay(250); } } throw new Error("Startup timeout"); }
 (async () => {
   const stored=process.argv.find(a=>a.startsWith("--stored-result"));
   const port=20000+Math.floor(Math.random()*10000)*2;
@@ -25,11 +25,11 @@ async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { retu
     const pages = await retry(async () => (await fetch(`http://127.0.0.1:${port+1}/json`)).json());
     ws = new WebSocket(pages.find(p=>p.type==="page"&&p.url==="about:blank").webSocketDebuggerUrl);
     await new Promise((resolve,reject)=> {ws.onopen=resolve;ws.onerror=reject;});
-    let id=0; const pending=new Map(), errors=[];
-    ws.onmessage = e => {const m=JSON.parse(e.data); if(m.id){const p=pending.get(m.id);if(!p)return;pending.delete(m.id); m.error?p.reject(m.error):p.resolve(m.result);} else if(m.method==="Runtime.exceptionThrown") errors.push(m.params.exceptionDetails);};
+    let id=0; const pending=new Map(), errors=[],loadFailures=[];
+    ws.onmessage = e => {const m=JSON.parse(e.data); if(m.id){const p=pending.get(m.id);if(!p)return;pending.delete(m.id); m.error?p.reject(m.error):p.resolve(m.result);} else if(m.method==="Network.loadingFailed") loadFailures.push(m.params); else if(m.method==="Runtime.exceptionThrown") errors.push(m.params.exceptionDetails);};
     const send=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;const timer=setTimeout(()=>{pending.delete(key);reject(Error(`CDP timeout: ${method}`));},40000);pending.set(key,{resolve:r=>{clearTimeout(timer);resolve(r);},reject:e=>{clearTimeout(timer);reject(e);}});ws.send(JSON.stringify({id:key,method,params}));});
     const evaluate=async expression=> {const r=await send("Runtime.evaluate",{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
-    await send("Runtime.enable");
+    await send("Runtime.enable");await send("Page.enable");await send("Network.enable");
     if(stored)await send("Emulation.setDeviceMetricsOverride",{width:1520,height:900,deviceScaleFactor:1,mobile:false});
     await send("Page.navigate",{url:`http://127.0.0.1:${port}`});
     if(stored){
@@ -50,7 +50,7 @@ async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { retu
       await send("Browser.close");return;
     }
     await retry(async()=> assert(await evaluate("typeof resultMeta !== 'undefined' && resultMeta?.replay === true"))).catch(async err=>{console.error('Startup state:',await evaluate("({status:document.getElementById('runStatus')?.textContent,meta:typeof resultMeta,loaded:!!window.SIM_RESULT})"),errors);throw err;});
-    await retry(async()=>assert(await evaluate("typeof openSettings==='function'")));
+    await retry(async()=>assert(await evaluate("document.readyState==='complete' && typeof openSettings==='function'"))).catch(async error=>{console.error("Script loading:",await evaluate("({url:location.href,ready:document.readyState,scripts:[...document.scripts].map(s=>s.src),resources:performance.getEntriesByType('resource').map(r=>({url:r.name,bytes:r.transferSize}))})"),errors,loadFailures);throw error;});
     assert.equal(await evaluate("document.getElementById('scenarioDetails').open"),false);
     assert.equal(await evaluate("document.getElementById('iniTable').checkVisibility()"),false);
     assert.equal(await evaluate("document.getElementById('scenarioConstellation').textContent"),"132기 · 12개 궤도면");
@@ -151,11 +151,18 @@ async function retry(fn,attempts=60) { for (let i=0;i<attempts;i++) { try { retu
     await evaluate(`window.batchResult=${nativeJson};window.batchFetch=window.fetch;window.batchBody=null;window.fetch=async(url,options)=>{if(url==='/api/experiments'){window.batchBody=JSON.parse(options.body);return new Response(JSON.stringify({runId:'browser-experiment'}),{status:202});}if(url==='/api/run/browser-experiment')return new Response(JSON.stringify({status:'completed',completedRuns:[{runId:batchResult.runId},{runId:batchResult.runId}],result:{runs:[]}}));if(String(url).startsWith('/api/result?runId='))return new Response(JSON.stringify(batchResult));return batchFetch(url,options);};byId('btnExperiment').click();`);
     await retry(async()=>assert(await evaluate("byId('experimentDialog').open")));
     assert.equal(await evaluate("document.querySelectorAll('.experiment-algorithm').length"),5);
-    await evaluate("[...document.querySelectorAll('.experiment-algorithm')].forEach((e,i)=>e.checked=i<2);byId('experimentForm').requestSubmit(byId('experimentForm').querySelector('[type=submit]'))");
+    await evaluate("[...document.querySelectorAll('.experiment-algorithm')].forEach((e,i)=>e.checked=i<2);byId('experimentRepetitions').value='10';byId('experimentSeed').value=7;byId('experimentWarmup').value=.1;byId('experimentDrain').value=.2;byId('experimentForm').requestSubmit(byId('experimentForm').querySelector('[type=submit]'))");
     await retry(async()=>assert(await evaluate("window.batchBody?.algorithms.length===2 && byId('compareDialog').open")));
     await evaluate("byId('compareDialog').close();window.fetch=window.batchFetch");
+    assert(await evaluate("batchBody.research.repetitions===10 && batchBody.research.seedStart===7 && batchBody.research.warmupSeconds===.1"));
+    await evaluate("showExperimentStatistics({stage:'pilot',seeds:[1,2],completedRuns:4,comparisons:[{baseline:'dijkstra-delay',algorithm:'mcsr-ls',metrics:[{name:'deliveryRate',statistics:{meanDifference:2,ci95:[1,3]},observedPairs:2},{name:'meanDelayMs',statistics:null,observedPairs:1}]}]})");
+    assert(await evaluate("byId('singleComparisonControls').hidden && byId('comparisonStatus').textContent.includes('예비 시험') && byId('comparisonContent').textContent.includes('1 ~ 3') && byId('comparisonContent').textContent.includes('관측 부족')"));
+    for(const width of [1520,1100,700]){await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:false});assert(await evaluate("byId('compareDialog').scrollWidth<=byId('compareDialog').clientWidth"));}
+    await evaluate("byId('compareDialog').close()");
+
 
     await evaluate("showComparison(resultMeta,resultMeta)");
+    assert(await evaluate("!byId('singleComparisonControls').hidden"));
     assert(await evaluate("byId('comparisonStatus').textContent.includes('동일한 환경')"));
     assert.equal(await evaluate("lastSatStates.length"),132);
     await evaluate("(async()=>{await openResultBundle((await fetch('/api/result').then(r=>r.json())).bundle)})()");
