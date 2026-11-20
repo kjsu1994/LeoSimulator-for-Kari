@@ -15,9 +15,10 @@ class ReleaseTests(unittest.TestCase):
                          "licenses/Microsoft-WebView2-1.0.3856.49.txt", "engine/main.cpp",
                          "engine/algorithms.h", "engine/vendor/json.hpp", "server.py", "sim-ui.spec", "sim-ui.ico",
                          "manual/index.html",
-                         "manual/assets/overview.png"):
+                         "manual/assets/overview.png", "manual/assets/ini-edit.png",
+                         "manual/assets/ini-trial-selected.png", "settings/simulations/Network/scenarios.defaults"):
                 self.assertTrue((package / file).is_file(), file)
-            ini = "settings/simulations/Network/omnetpp.ini"
+            ini = "settings/simulations/Network/scenarios.ini"
             self.assertEqual((package / ini).read_bytes(), (build_release.ROOT / ini).read_bytes())
             self.assertFalse((package / ".git").exists())
             self.assertFalse((package / "build").exists())

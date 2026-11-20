@@ -17,14 +17,14 @@ button { cursor:pointer; }
 .skip { position:absolute; top:8px; left:12px; transform:translateY(-150%); background:white; padding:5px 9px; z-index:4; }
 .skip:focus { transform:none; }
 .toolbar { position:sticky; top:0; z-index:2; background:#102a45; color:#f7fbff; border-bottom:1px solid #314d68; }
-.tools { max-width:1280px; min-height:64px; margin:auto; display:flex; align-items:center; gap:12px; padding:9px 22px; }
+.tools { max-width:1720px; min-height:64px; margin:auto; display:flex; align-items:center; gap:12px; padding:9px 22px; }
 .brand { color:inherit; text-decoration:none; font-weight:700; white-space:nowrap; }
 .search { margin-left:auto; display:flex; gap:5px; align-items:center; }
 .search input { width:clamp(140px,24vw,330px); min-width:0; padding:5px 9px; border:1px solid #7991a6; border-radius:5px; }
 .tools button { color:inherit; background:#203e5c; border:1px solid #66819c; border-radius:5px; padding:4px 9px; white-space:nowrap; }
 .tools button:hover { background:#365b7e; }.tools button:disabled{opacity:.55;cursor:default;}
 .version { font-size:13px; color:#c7d8e8; white-space:nowrap; }
-.layout { max-width:1280px; margin:auto; padding:26px 22px 60px; display:grid; grid-template-columns:245px minmax(0,1fr); gap:25px; align-items:start; }
+.layout { max-width:1720px; margin:auto; padding:26px clamp(14px,2vw,32px) 60px; display:grid; grid-template-columns:245px minmax(0,1fr); gap:clamp(14px,1.8vw,28px); align-items:start; }
 .sidebar { position:sticky; top:86px; max-height:calc(100vh - 108px); overflow:auto; background:#fff; border:1px solid var(--line); border-radius:9px; padding:12px; }
 .sidebar summary { cursor:pointer; font-weight:700; padding:4px 8px; }.sidebar nav{padding:5px 0;}
 .sidebar a { display:block; padding:5px 8px; text-decoration:none; border-radius:5px; font-size:14px; }
@@ -43,24 +43,51 @@ table { width:100%; margin:15px 0; border-collapse:collapse; font-size:14px; }
 th,td { border:1px solid #d4e0ea; padding:8px 10px; text-align:left; vertical-align:top; }
 thead th { background:#e5f0f8; color:#143b5d; } tbody th { font-weight:650; min-width:98px; width:26%; background:#f5f8fb; }
 figure { margin:14px 0; text-align:center; } figure a{display:inline-block;max-width:100%;} figure img{display:block;max-width:100%;max-height:490px;margin:auto;border:1px solid #b3c7db;border-radius:7px;} figcaption{color:var(--muted);font-size:13px;margin-top:3px;}
+/* Keep screenshots next to the controls they illustrate. */
+.illustrated { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,.85fr); align-items:start; gap:clamp(18px,3vw,44px); margin:14px 0; }
+.illustrated.wide-image { grid-template-columns:minmax(0,1fr) minmax(0,1.2fr); }
+.ini-walkthrough { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.illustrated > div > :first-child { margin-top:0; }
+.illustrated > div > :last-child { margin-bottom:0; }
+.illustrated figure { margin:0; text-align:left; }
+.illustrated figure img { width:auto; height:auto; margin:0; }
 .tip { background:#eaf3fa; border-left:3px solid #2a80b8; padding:9px 12px; margin:15px 0; }
 .paging { display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; border-top:1px solid var(--line); margin-top:20px; padding-top:12px; font-size:14px; }
 .note { color:var(--muted); font-size:13px; }
+pre { margin:12px 0; padding:12px 14px; background:#f2f6fa; border:1px solid var(--line); border-radius:6px; white-space:pre-wrap; overflow-wrap:anywhere; }
+code { font-family:Consolas,monospace; }
 mark { background:#ffe58f; color:#211800; }
 @media(max-width:900px){.layout{grid-template-columns:188px minmax(0,1fr);gap:14px}.sheet{padding:25px}.tools{padding-inline:15px}}
 @media(max-width:680px){html{scroll-padding-top:128px}.tools{flex-wrap:wrap;gap:7px}.tools .search{margin:0;flex:1 0 100%;order:4}.search input{flex:1}.layout{display:block;padding:12px}.sidebar{position:static;max-height:none;margin-bottom:12px}.sheet{padding:18px}.toc ol{grid-template-columns:1fr}h1{font-size:28px}h2{font-size:22px}th,td{padding:6px}}
-@page { size:A4; margin:15mm 16mm; }
+@media screen and (max-width:1000px){.illustrated,.illustrated.wide-image,.ini-walkthrough{grid-template-columns:minmax(0,1fr);gap:12px}}
+@page { size:A4 landscape; margin:11mm 14mm; }
 @media print {
   html,body{background:#fff;font-size:10.25pt;line-height:1.53;}
   .toolbar,.sidebar,.paging,.skip,.save-note{display:none!important;}
   .layout{display:block;padding:0;max-width:none;}
   .sheet{margin:0;padding:0;border:0;border-radius:0;break-before:page;}
   .cover{break-before:auto;border-top:3pt solid #1a6ca3;padding-top:18mm;}
-  .toc ol{display:grid;grid-template-columns:1fr 1fr;}
+  .toc ol{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));}
   h1{font-size:27pt;} h2{font-size:20pt;} h3{font-size:13pt;}
   .sheet-brand img{width:35mm;} .cover .sheet-brand img{width:47mm;}
   .lead{font-size:11.5pt;margin-bottom:10pt;} .kicker{font-size:9pt;}
-  figure,table,.tip{break-inside:avoid;} figure img{max-height:96mm;} figcaption{font-size:9pt;}
+  .illustrated{gap:7mm;margin:3mm 0;break-inside:avoid;}
+  figure,tr,pre,.tip{break-inside:avoid;} thead{display:table-header-group;}
+  .illustrated figure img{max-height:78mm;} figcaption{font-size:9pt;}
+  #settings .illustrated figure img{max-height:48mm;}
+  #metrics .illustrated{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);}
+  #metrics .illustrated figure img{max-height:52mm;}
+  #metrics .illustrated p{margin-block:5pt;}
+  #add-trial .illustrated{font-size:9.7pt;line-height:1.4;}
+  #add-trial .illustrated h3{margin-block:8pt 4pt;}
+  #add-trial .illustrated p{margin-block:5pt;}
+  #add-trial .illustrated figure img{max-height:39mm;}
+  #add-trial pre{margin:5pt 0;padding:6pt 8pt;}
+  .ini-reference{break-before:page;margin-top:0;}
+  .ini-reference + table{font-size:9.4pt;line-height:1.2;}
+  .ini-reference + table th,.ini-reference + table td{padding:2.5pt 5pt;}
+  .ini-reference + table tbody th{width:34%;}
+  h2,h3{break-after:avoid;}
   table{font-size:9.8pt;margin:8pt 0;} th,td{padding:4pt 6pt;}
   .tip{margin:8pt 0;} th,.tip{print-color-adjust:exact;} mark{background:transparent;color:inherit;}
 }
@@ -80,7 +107,7 @@ mark { background:#ffe58f; color:#211800; }
 </div></header>
 <div class="layout">
   <aside class="sidebar">
-    <details id="contents" open><summary>목차</summary><nav aria-label="설명서 목차"><a href="#cover">표지·목차</a><a href="#overview">프로그램과 화면 구성</a><a href="#install">설치와 첫 실행</a><a href="#scenarios">시험 조건과 알고리즘 선택</a><a href="#algorithms">알고리즘과 비교 목적</a><a href="#settings">조건 수정과 기본값</a><a href="#ini">INI와 외부 일정 편집</a><a href="#playback">지도 재생과 결과 열기</a><a href="#metrics">수신 결과와 복구 지표 읽기</a><a href="#compare">비교 실행과 반복 실험</a><a href="#results">결과 보관과 문제 해결</a></nav></details>
+    <details id="contents" open><summary>목차</summary><nav aria-label="설명서 목차"><a href="#cover">표지·목차</a><a href="#overview">프로그램과 화면 구성</a><a href="#install">설치와 첫 실행</a><a href="#scenarios">시험 조건과 알고리즘 선택</a><a href="#algorithms">알고리즘과 비교 목적</a><a href="#settings">조건 수정과 기본값</a><a href="#ini">INI와 외부 일정 편집</a><a href="#add-trial">INI로 시험 추가</a><a href="#playback">지도 재생과 결과 열기</a><a href="#metrics">수신 결과와 복구 지표 읽기</a><a href="#compare">비교 실행과 반복 실험</a><a href="#results">결과 보관과 문제 해결</a></nav></details>
     <nav id="results" class="results" aria-label="검색 결과" hidden></nav>
   </aside>
   <main id="manual" tabindex="-1">
@@ -90,13 +117,16 @@ mark { background:#ffe58f; color:#211800; }
       <p class="lead">저궤도 위성망에서 패킷 전달, 장애 복구 및 라우팅 알고리즘을 시험하는 방법을 안내합니다.</p>
       <p>바로 시작하려면 <a href="#install">설치와 첫 실행</a>을 참고하세요. 프로그램 상단의 작은 문서 아이콘으로 이 설명서를 다시 열 수 있습니다.</p>
       <p class="note save-note">파일로 보관하려면 상단의 <strong>PDF 저장</strong>을 누른 뒤 인쇄 창의 대상에서 <strong>PDF로 저장</strong>을 선택하세요.</p>
-      <nav class="toc" aria-label="전체 목차"><h2>목차</h2><ol><li><a href="#overview">프로그램과 화면 구성</a></li><li><a href="#install">설치와 첫 실행</a></li><li><a href="#scenarios">시험 조건과 알고리즘 선택</a></li><li><a href="#algorithms">알고리즘과 비교 목적</a></li><li><a href="#settings">조건 수정과 기본값</a></li><li><a href="#ini">INI와 외부 일정 편집</a></li><li><a href="#playback">지도 재생과 결과 열기</a></li><li><a href="#metrics">수신 결과와 복구 지표 읽기</a></li><li><a href="#compare">비교 실행과 반복 실험</a></li><li><a href="#results">결과 보관과 문제 해결</a></li></ol></nav>
+      <nav class="toc" aria-label="전체 목차"><h2>목차</h2><ol><li><a href="#overview">프로그램과 화면 구성</a></li><li><a href="#install">설치와 첫 실행</a></li><li><a href="#scenarios">시험 조건과 알고리즘 선택</a></li><li><a href="#algorithms">알고리즘과 비교 목적</a></li><li><a href="#settings">조건 수정과 기본값</a></li><li><a href="#ini">INI와 외부 일정 편집</a></li><li><a href="#add-trial">INI로 시험 추가</a></li><li><a href="#playback">지도 재생과 결과 열기</a></li><li><a href="#metrics">수신 결과와 복구 지표 읽기</a></li><li><a href="#compare">비교 실행과 반복 실험</a></li><li><a href="#results">결과 보관과 문제 해결</a></li></ol></nav>
     </section>
     <section class="sheet" id="overview" aria-labelledby="overview-title">
 <div class="sheet-brand"><p class="kicker">사용자 설명서 · 01</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="overview-title">프로그램과 화면 구성</h2><p class="lead">시험 조건을 정하고 실행한 뒤, 지도와 수신 결과에서 같은 실행을 살펴봅니다.</p>
+<div class="illustrated wide-image">
+<div><table><thead><tr><th scope="col">화면</th><th scope="col">하는 일</th></tr></thead><tbody><tr><th scope="row">상단 재생 도구</th><td>현재 결과의 재생·일시 정지, 시각 이동, 재생 속도 조절과 결과 불러오기</td></tr><tr><th scope="row">왼쪽 지도</th><td>위성 위치, 위성 간 연결(ISL), 지상 연결(GSL) 및 계획 경로 확인</td></tr><tr><th scope="row">오른쪽 새 시뮬레이션</th><td>시험 조건과 알고리즘을 선택하고 새 실행 또는 비교 실행 시작</td></tr><tr><th scope="row">오른쪽 수신 결과</th><td>전달률·수신 지연·처리량, 시간별 그래프와 실행 비교 확인</td></tr></tbody></table>
+<aside class="tip">ⓘ 아이콘에 마우스를 올리거나 클릭하면 해당 화면과 설정값의 설명을 볼 수 있습니다.</aside></div>
 <figure><a href="assets/overview.png" target="_blank" rel="noopener" aria-label="그림 1. 지도 재생, 새 시뮬레이션 및 수신 결과가 표시된 기본 화면 · 원본 보기"><img src="assets/overview.png" alt="그림 1. 지도 재생, 새 시뮬레이션 및 수신 결과가 표시된 기본 화면"></a><figcaption>그림 1. 지도 재생, 새 시뮬레이션 및 수신 결과가 표시된 기본 화면</figcaption></figure>
-<table><thead><tr><th scope="col">화면</th><th scope="col">하는 일</th></tr></thead><tbody><tr><th scope="row">상단 재생 도구</th><td>현재 결과의 재생·일시 정지, 시각 이동, 재생 속도 조절과 결과 불러오기</td></tr><tr><th scope="row">왼쪽 지도</th><td>위성 위치, 위성 간 연결(ISL), 지상 연결(GSL) 및 계획 경로 확인</td></tr><tr><th scope="row">오른쪽 새 시뮬레이션</th><td>시험 조건과 알고리즘을 선택하고 새 실행 또는 비교 실행 시작</td></tr><tr><th scope="row">오른쪽 수신 결과</th><td>전달률·수신 지연·처리량, 시간별 그래프와 실행 비교 확인</td></tr></tbody></table>
-<aside class="tip">ⓘ 아이콘에 마우스를 올리거나 클릭하면 해당 화면과 설정값의 설명을 볼 수 있습니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#cover">← 표지·목차</a><a href="#install">설치와 첫 실행 →</a></nav>
+</div>
+<nav class="paging" aria-label="항목 이동"><a href="#cover">← 표지·목차</a><a href="#install">설치와 첫 실행 →</a></nav>
 </section><section class="sheet" id="install" aria-labelledby="install-title">
 <div class="sheet-brand"><p class="kicker">사용자 설명서 · 02</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="install-title">설치와 첫 실행</h2><p class="lead">Windows x64 환경에서 배포 ZIP을 모두 풀고 sim-ui.exe를 실행합니다.</p>
 <h3>실행 전 준비</h3>
@@ -106,9 +136,12 @@ mark { background:#ffe58f; color:#211800; }
 <aside class="tip">EXE에는 Python 실행 환경이 포함됩니다. OMNeT++, INET, WSL, Docker 또는 원본 프로젝트를 준비할 필요가 없습니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#overview">← 프로그램과 화면 구성</a><a href="#scenarios">시험 조건과 알고리즘 선택 →</a></nav>
 </section><section class="sheet" id="scenarios" aria-labelledby="scenarios-title">
 <div class="sheet-brand"><p class="kicker">사용자 설명서 · 03</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="scenarios-title">시험 조건과 알고리즘 선택</h2><p class="lead">시험 조건은 위성망·송신·장애 등 입력을 정하고, 알고리즘은 그 안에서 경로를 고르는 방법을 정합니다.</p>
+<div class="illustrated">
+<div><p>추가 시험 표시는 기본 목록에 더해 INI에 등록된 전체 시험 구성을 보여줍니다. 조건을 선택하면 목록 아래 설명과 설정 요약이 갱신됩니다. 실행을 누르면 선택한 조건으로 새 결과가 생성됩니다.</p>
+<table><thead><tr><th scope="col">조건</th><th scope="col">기본 설정에서 확인하는 내용</th></tr></thead><tbody><tr><th scope="row">기본 통신</th><td>기본 위성군과 여러 송신 노드에서 전달률·지연·계획 경로 확인</td></tr><tr><th scope="row">반복 링크 장애</th><td>60·120·180초마다 고정 출발·목적 흐름의 기준 경로에서 위성 간 링크 하나를 각각 30초 동안 끊어 우회와 수신 재개 확인</td></tr><tr><th scope="row">무작위 링크 장애</th><td>30~570초 사이에 무작위 링크 장애 20건을 각각 30초씩 적용해 전달률·지연 확인. 같은 입력과 장애 시드는 동일 장애 일정을 재현</td></tr></tbody></table></div>
 <figure><a href="assets/scenario.png" target="_blank" rel="noopener" aria-label="그림 2. 추가 시험 표시를 켜고 반복 링크 장애를 선택한 화면 · 원본 보기"><img src="assets/scenario.png" alt="그림 2. 추가 시험 표시를 켜고 반복 링크 장애를 선택한 화면"></a><figcaption>그림 2. 추가 시험 표시를 켜고 반복 링크 장애를 선택한 화면</figcaption></figure>
-<p>추가 시험 표시는 기본 목록에 더해 INI에 등록된 전체 시험 구성을 보여줍니다. 조건을 선택하면 목록 아래 설명과 설정 요약이 갱신됩니다. 실행을 누르면 선택한 조건으로 새 결과가 생성됩니다.</p>
-<table><thead><tr><th scope="col">조건</th><th scope="col">기본 설정에서 확인하는 내용</th></tr></thead><tbody><tr><th scope="row">기본 통신</th><td>기본 위성군과 여러 송신 노드에서 전달률·지연·계획 경로 확인</td></tr><tr><th scope="row">반복 링크 장애</th><td>60·120·180초마다 고정 출발·목적 흐름의 기준 경로에서 위성 간 링크 하나를 각각 30초 동안 끊어 우회와 수신 재개 확인</td></tr><tr><th scope="row">무작위 링크 장애</th><td>30~570초 사이에 무작위 링크 장애 20건을 각각 30초씩 적용해 전달률·지연 확인. 같은 입력과 장애 시드는 동일 장애 일정을 재현</td></tr></tbody></table><nav class="paging" aria-label="항목 이동"><a href="#install">← 설치와 첫 실행</a><a href="#algorithms">알고리즘과 비교 목적 →</a></nav>
+</div>
+<nav class="paging" aria-label="항목 이동"><a href="#install">← 설치와 첫 실행</a><a href="#algorithms">알고리즘과 비교 목적 →</a></nav>
 </section><section class="sheet" id="algorithms" aria-labelledby="algorithms-title">
 <div class="sheet-brand"><p class="kicker">사용자 설명서 · 04</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="algorithms-title">알고리즘과 비교 목적</h2><p class="lead">알고리즘을 고르면 선택한 INI 구성에 저장됩니다. 저장된 지도와 수신 결과는 새 실행이 끝날 때까지 그 실행의 데이터를 표시합니다.</p>
 <table><thead><tr><th scope="col">화면 표시</th><th scope="col">경로 선택 기준</th></tr></thead><tbody><tr><th scope="row">Dijkstra · 지연 최소</th><td>전파 지연을 최소화하는 경로</td></tr><tr><th scope="row">Dijkstra · 홉 최소</th><td>홉 수를 최소화하는 경로</td></tr><tr><th scope="row">MCSR-LS</th><td>지연 우선</td></tr><tr><th scope="row">MCSR-TS</th><td>처리량 우선. 지연 상한을 지정할 수 있음</td></tr><tr><th scope="row">MCSR-HR</th><td>신뢰성 우선. 지터 제약을 지정할 수 있음</td></tr></tbody></table>
@@ -117,35 +150,94 @@ mark { background:#ffe58f; color:#211800; }
 <aside class="tip">링크 장애 비교는 같은 물리 사건과 공통 SRD에 대해 진행합니다. 반복 링크 장애의 대상은 해당 시각의 기준 경로에서 정해집니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#scenarios">← 시험 조건과 알고리즘 선택</a><a href="#settings">조건 수정과 기본값 →</a></nav>
 </section><section class="sheet" id="settings" aria-labelledby="settings-title">
 <div class="sheet-brand"><p class="kicker">사용자 설명서 · 05</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="settings-title">조건 수정과 기본값</h2><p class="lead">조건 수정에서 변경한 값은 INI에 저장을 누르면 다음 실행에 적용됩니다.</p>
-<p>시간 가정을 선택하면 DS·CSIB 설정이 화면에서 사라지며, INI에 저장하면 CSIB가 꺼집니다. DS·CSIB를 시험하려면 실제 패킷을 선택하세요.</p>
-<figure><a href="assets/conditions.png" target="_blank" rel="noopener" aria-label="그림 3. 조건 수정과 기본값 미리 보기 · 원본 보기"><img src="assets/conditions.png" alt="그림 3. 조건 수정과 기본값 미리 보기"></a><figcaption>그림 3. 조건 수정과 기본값 미리 보기</figcaption></figure>
+<div class="illustrated">
+<div><p>시간 가정을 선택하면 DS·CSIB 설정이 화면에서 사라지며, INI에 저장하면 CSIB가 꺼집니다. DS·CSIB를 시험하려면 실제 패킷을 선택하세요.</p>
+
 <ol><li>시험 조건을 선택한 뒤 조건 수정을 누릅니다.</li><li>기본 설정, 트래픽, 링크 및 장애·환경 조건을 확인합니다. 항목 옆 ⓘ에서 단위와 변경 효과를 읽을 수 있습니다.</li><li>제공 설정을 다시 불러오려면 기본값을 누릅니다. 적용하려면 INI에 저장, 이번 편집을 버리려면 취소를 누릅니다.</li></ol>
-<p>기본값은 선택한 구성의 제공 섹션을 기준으로 하며 상속값은 현재 상위 설정을 따릅니다. 직접 추가한 구성은 제공 기본값이 없으므로 값을 직접 편집합니다.</p>
-<table><thead><tr><th scope="col">조정할 값</th><th scope="col">관찰할 항목</th></tr></thead><tbody><tr><th scope="row">위성 수·궤도면·고도</th><td>위성 수는 궤도면 수로 나누어 떨어져야 합니다. 접속 기회와 경로 길이의 변화를 관찰합니다.</td></tr><tr><th scope="row">송신률·송신 간격·패킷 크기</th><td>발생 패킷 수, 큐 대기와 폐기, 처리량 변화를 관찰합니다.</td></tr><tr><th scope="row">최소 고도각·링크 용량·큐</th><td>접속 범위, 병목 및 링크 포화의 변화를 관찰합니다.</td></tr></tbody></table><nav class="paging" aria-label="항목 이동"><a href="#algorithms">← 알고리즘과 비교 목적</a><a href="#ini">INI와 외부 일정 편집 →</a></nav>
+<p>기본값은 선택한 구성의 제공 섹션을 기준으로 하며 상속값은 현재 상위 설정을 따릅니다. 직접 추가한 구성은 제공 기본값이 없으므로 값을 직접 편집합니다.</p></div>
+<figure><a href="assets/conditions.png" target="_blank" rel="noopener" aria-label="그림 3. 조건 수정과 기본값 미리 보기 · 원본 보기"><img src="assets/conditions.png" alt="그림 3. 조건 수정과 기본값 미리 보기"></a><figcaption>그림 3. 조건 수정과 기본값 미리 보기</figcaption></figure>
+</div>
+<table><thead><tr><th scope="col">조정할 값</th><th scope="col">관찰할 항목</th></tr></thead><tbody><tr><th scope="row">위성 수·궤도면·고도</th><td>위성 수는 궤도면 수로 나누어 떨어져야 합니다. 접속 기회와 경로 길이의 변화를 관찰합니다.</td></tr><tr><th scope="row">송신률·송신 간격·패킷 크기</th><td>발생 패킷 수, 큐 대기와 폐기, 처리량 변화를 관찰합니다.</td></tr><tr><th scope="row">최소 고도각·링크 용량·큐</th><td>접속 범위, 병목 및 링크 포화의 변화를 관찰합니다.</td></tr><tr><th scope="row">시드·실행 시간</th><td>무작위 입력을 재현하고, 장애 발생과 복구가 관측 구간에 들어오도록 설정합니다.</td></tr>
+<tr><th scope="row">송신 노드·목적지·시작/종료</th><td>어느 지상국이 언제 어디로 송신하는지 정합니다. 흐름별 전달률과 지연을 비교합니다.</td></tr>
+<tr><th scope="row">장애 일정·환경 혼잡</th><td>링크 단절, 전송 용량 감소, 추가 지연·손실을 설정합니다. 우회 경로와 수신 재개를 관찰합니다.</td></tr>
+<tr><th scope="row">MCSR 제약·예비 경로</th><td>TS의 지연 상한과 HR의 지터 제약은 경로 후보를 제한합니다. 예비 경로는 장애 시 먼저 시도할 경로를 보관합니다.</td></tr>
+<tr><th scope="row">제어 통신·DS/CSIB</th><td>상태 감지·전파와 지역 상태 교환을 조정합니다. 제어 전송량과 정보 수렴 시간을 관찰합니다.</td></tr>
+<tr><th scope="row">결과 기록</th><td>경로 저장 범위와 패킷 추적을 정합니다. 상세 기록을 켜면 결과 폴더 크기가 늘어납니다.</td></tr>
+</tbody></table><nav class="paging" aria-label="항목 이동"><a href="#algorithms">← 알고리즘과 비교 목적</a><a href="#ini">INI와 외부 일정 편집 →</a></nav>
 </section><section class="sheet" id="ini" aria-labelledby="ini-title">
 <div class="sheet-brand"><p class="kicker">사용자 설명서 · 06</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="ini-title">INI와 외부 일정 편집</h2><p>설정 파일·저장 위치의 실행 결과 저장 폴더에서 현재 위치를 확인할 수 있습니다. 폴더 선택이나 기본 위치로 변경한 뒤 앱을 다시 엽니다.</p><p class="lead">자주 쓰는 값은 조건 수정에서, INI 원문은 설정 파일·저장 위치의 INI 파일 열기에서 확인합니다.</p>
-<ol><li>새 시뮬레이션에서 설정 파일·저장 위치를 펼치고 INI 파일 열기를 누릅니다.</li><li>배포 EXE의 실행 설정은 프로그램 폴더의 settings/simulations/Network/omnetpp.ini에 있습니다. 파일을 UTF-8로 저장하고 설정 새로고침을 누릅니다.</li><li>새 구성은 [Config 이름]과 extends로 만들 수 있습니다. 추가 시험 표시를 켜고 새 구성을 선택합니다.</li></ol>
+<ol><li>새 시뮬레이션에서 설정 파일·저장 위치를 펼치고 INI 파일 열기를 누릅니다.</li><li>프로그램 폴더의 <code>settings/simulations/Network/scenarios.ini</code>를 UTF-8로 저장합니다.</li><li>프로그램에서 <strong>설정 새로고침</strong>을 누릅니다. 새 시험은 <a href="#add-trial">INI로 시험 추가</a>를 참고하세요.</li></ol>
 <table><thead><tr><th scope="col">내용</th><th scope="col">형식 또는 위치</th></tr></thead><tbody><tr><th scope="row">링크 직접 장애</th><td>12-13@60+30 → 위성 12와 13 사이 링크를 60초에 30초간 끊음</td></tr><tr><th scope="row">기준 경로 장애</th><td>route@60+30 → 기준 경로의 위성 간 링크를 60초에 30초간 끊음</td></tr><tr><th scope="row">계획된 ISL 개폐</th><td>time,event,satA,satB 열이 있는 CSV. event에는 failure 또는 restore를 사용하며 시간 단위는 초</td></tr><tr><th scope="row">지역 혼잡</th><td>환경 조건에서 링크, 위성, 궤도면, 지도 구역 등을 지정해 용량·버퍼·지연·지터·손실을 설정</td></tr></tbody></table>
-<p>외부 일정은 INI에 경로를 지정합니다. 기존 시나리오의 개폐 일정이나 장애 기록이 적용되는 경우 조건 수정 화면 상단에 표시됩니다. 상대 경로는 진입 INI의 위치를 기준으로 해석합니다. 개폐 일정은 고정 격자에 있는 링크를 사용합니다. 기존 구성 형식과 지원 키는 README.md의 시나리오 설정 항목에서 확인할 수 있습니다.</p><nav class="paging" aria-label="항목 이동"><a href="#settings">← 조건 수정과 기본값</a><a href="#playback">지도 재생과 결과 열기 →</a></nav>
-</section><section class="sheet" id="playback" aria-labelledby="playback-title">
+<p>외부 일정은 INI에 경로를 지정합니다. 기존 시나리오의 개폐 일정이나 장애 기록이 적용되는 경우 조건 수정 화면 상단에 표시됩니다. 상대 경로는 진입 INI의 위치를 기준으로 해석합니다. 개폐 일정은 고정 격자에 있는 링크를 사용합니다. 기존 구성 형식과 지원 키는 README.md의 시나리오 설정 항목에서 확인할 수 있습니다.</p><nav class="paging" aria-label="항목 이동"><a href="#settings">← 조건 수정과 기본값</a><a href="#add-trial">INI로 시험 추가 →</a></nav>
+</section><section class="sheet" id="add-trial" aria-labelledby="add-trial-title">
+<div class="sheet-brand"><p class="kicker">사용자 설명서</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div>
+<h2 id="add-trial-title">INI로 시험 추가</h2>
+<div class="illustrated ini-walkthrough">
+<div>
+<h3>1. 설정 파일 열기</h3>
+<p>새 시뮬레이션에서 <strong>설정 파일·저장 위치 → INI 파일 열기</strong>를 누릅니다. 메모장에서 <code>scenarios.ini</code>가 열립니다.</p>
+<figure><a href="assets/ini-edit.png" target="_blank" rel="noopener"><img src="assets/ini-edit.png" alt="설정 파일 아래의 INI 파일 열기와 설정 새로고침 버튼"></a><figcaption>INI를 열고 저장 후 설정 새로고침을 누르는 위치</figcaption></figure>
+<h3>2. 파일 맨 아래에 시험 추가</h3>
+<p>아래 예시를 붙여 넣습니다. 이름이 이미 쓰였다면 <code>MyLinkTest</code>를 바꿉니다. <code>Ctrl+S</code>로 같은 파일에 UTF-8 형식으로 저장합니다.</p>
+<pre><code>[Config MyLinkTest]
+displayName = "내 단일 링크 시험"
+extends = Dijkstra132Pair
+sim-time-limit = 100s
+*.station[0].traffic.sendInterval = 2s
+*.islFailures.schedule = "route@60+30"</code></pre>
+<p>기존 단일 구간 시험을 바탕으로 100초 동안 실행합니다. 지상국 0은 2초마다 패킷을 보내고, 60초에 기준 경로의 위성 간 링크를 30초 동안 끊습니다.</p>
+</div>
+<div>
+<h3>3. 시험 목록에서 선택</h3>
+<p>앱에서 <strong>설정 새로고침</strong>을 누른 뒤 <strong>시험 조건 → 내 단일 링크 시험</strong>을 선택합니다. 실행 시간이 100초인지 확인하고, <strong>조건 수정</strong>에서 송신 간격과 장애 일정을 확인합니다. 원하는 알고리즘을 선택하고 실행합니다.</p>
+<figure><a href="assets/ini-trial-selected.png" target="_blank" rel="noopener"><img src="assets/ini-trial-selected.png" alt="내 단일 링크 시험을 선택한 화면과 실행 시간 100초"></a><figcaption>추가한 시험을 선택한 화면</figcaption></figure>
+<h3>시험이 보이지 않을 때</h3>
+<ul><li><strong>INI 파일 열기</strong>로 연 파일에 저장했는지 확인합니다. 결과 폴더의 INI는 보관된 실행에 사용한 사본입니다.</li><li>실행할 구성에는 고유한 이름을 사용하고 <code>abstract = true</code>는 생략합니다. 상속 전용 블록을 쓰려면 실행용 구성을 따로 만들고 <code>extends</code>에 상속 전용 블록과 기준 시험을 적습니다.</li><li>직접 추가한 실행용 구성은 기본 목록에 나옵니다. <strong>조건 수정 → 기본값</strong>은 프로그램이 기본값을 제공하는 구성에서 사용할 수 있습니다.</li></ul>
+</div>
+</div>
+<h3 class="ini-reference">시험을 추가할 때 자주 쓰는 설정</h3>
+<table><thead><tr><th scope="col">INI 항목</th><th scope="col">의미와 입력 예</th></tr></thead><tbody>
+<tr><th scope="row"><code>[Config 이름]</code><br><code>displayName</code><br><code>description</code></th><td>구성의 고유 이름, 화면의 표시 이름, 시험 설명입니다. 표시 이름을 생략하면 구성 이름을 그대로 사용합니다.</td></tr>
+<tr><th scope="row"><code>extends</code><br><code>abstract</code></th><td>기준 구성의 값을 상속합니다. 새 블록의 값이 우선하고, 여러 상위 구성을 나열하면 앞에 적은 구성이 우선합니다. <code>abstract = true</code>인 구성은 상속용으로 숨겨집니다.</td></tr>
+<tr><th scope="row"><code>additional</code></th><td><code>true</code>로 지정하면 추가 시험 표시를 켰을 때 목록에 나옵니다.</td></tr><tr><th scope="row"><code>sim-time-limit</code><br><code>seed-0-mt</code></th><td>시뮬레이션 종료 시각과 난수 시드입니다. 예를 들어 <code>100s</code>로 실행 시간을 지정합니다.</td></tr>
+<tr><th scope="row"><code>*.numSatellites</code><br><code>*.**.planeCount</code></th><td>위성 수와 궤도면 수입니다. 위성 수가 궤도면 수로 나누어 떨어지는 조합을 사용합니다.</td></tr>
+<tr><th scope="row"><code>*.constellationCreator.altitude</code><br><code>*.constellationCreator.inclination</code></th><td>궤도의 높이(km)와 경사각(°)입니다. 위성의 지상 가시 범위와 접속 기회에 영향을 줍니다.</td></tr>
+<tr><th scope="row"><code>*.station[0].traffic.enabled</code><br><code>*.station[0].traffic.dstType</code><br><code>*.station[0].traffic.dstStation</code></th><td>지상국 0의 송신 여부, 목적지 유형과 목적지 번호입니다. <code>[0..3]</code>은 0~3번에 적용합니다.</td></tr>
+<tr><th scope="row"><code>*.station[0].traffic.sendInterval</code><br><code>*.station[0].traffic.packetSize</code></th><td>송신 간격과 패킷 크기입니다. 예를 들어 <code>2s</code>와 <code>1000B</code>를 사용합니다.</td></tr>
+<tr><th scope="row"><code>*.station[0].traffic.startTime</code><br><code>*.station[0].traffic.endTime</code></th><td>새 패킷을 만들기 시작하고 끝내는 시각입니다. 시작 시각은 <code>uniform(1s, 3s)</code>처럼 범위도 지정할 수 있습니다.</td></tr>
+<tr><th scope="row"><code>*.topologyControl.islDatarate</code><br><code>*.topologyControl.groundlinkDatarate</code></th><td>위성 간 링크와 지상·위성 링크의 전송 용량입니다. 예를 들어 <code>100Mbps</code>를 사용합니다.</td></tr>
+<tr><th scope="row"><code>*.topologyControl.minimumElevation</code><br><code>*.topologyControl.updateInterval</code></th><td>지상 접속에 필요한 최소 고도각(°)과 위치·연결 갱신 간격입니다. 간격을 줄이면 더 자주 계산합니다.</td></tr>
+<tr><th scope="row"><code>*.islFailures.schedule</code></th><td>장애 일정입니다. <code>"route@60+30"</code>은 기준 경로의 링크를, <code>"12-13@60+30"</code>은 위성 12와 13의 링크를 60초에 30초 동안 끊습니다.</td></tr>
+<tr><th scope="row"><code>*.islFailures.randomFailures</code><br><code>*.islFailures.randomStart</code><br><code>*.islFailures.randomEnd</code><br><code>*.islFailures.randomDuration</code></th><td>무작위 장애 수, 발생 구간의 시작·끝, 장애 한 건의 지속 시간입니다.</td></tr>
+<tr><th scope="row"><code>*.satellite[*].net.routing.algorithm</code></th><td>라우팅 알고리즘입니다. 프로그램의 알고리즘 목록에서도 선택할 수 있습니다.</td></tr>
+</tbody></table>
+<p>환경 조건, MCSR·CSIB 및 결과 기록 항목은 <strong>조건 수정</strong>의 ⓘ 도움말에서 확인할 수 있습니다.</p>
+<nav class="paging" aria-label="항목 이동"><a href="#ini">← INI와 외부 일정 편집</a><a href="#playback">지도 재생과 결과 열기 →</a></nav>
+</section>
+<section class="sheet" id="playback" aria-labelledby="playback-title">
 <div class="sheet-brand"><p class="kicker">사용자 설명서 · 07</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="playback-title">지도 재생과 결과 열기</h2><p class="lead">현재 재생 중인 지도와 새 시뮬레이션 설정은 화면의 상태 표시에서 구분합니다.</p>
 <table><thead><tr><th scope="col">열기 방식</th><th scope="col">표시되는 내용</th></tr></thead><tbody><tr><th scope="row">실행 결과 열기</th><td>EXE의 보관 목록에서 시험 조건·알고리즘·실행 ID를 검색합니다. 외부 결과는 외부 폴더 열기를 사용합니다. 보관된 설정과 사건으로 위성 위치·링크·경로를 재생하며, 저장된 수신 통계를 표시합니다.</td></tr></tbody></table>
 <ol><li>외부 폴더를 열거나 HTML로 직접 열었을 때는 manifest.json이 들어 있는 data/runs/&lt;실행 ID&gt; 폴더를 선택합니다.</li><li>슬라이더 또는 −1s / +1s로 관찰 시각을 이동하고, 재생 속도를 바꿔 움직임을 확인합니다. 배율의 직접 입력에서 0.00001~60배를 지정할 수 있습니다. 지도 크게 보기로 지도 영역을 넓히고 패널 열기로 오른쪽을 복원합니다. 넓은 창에서는 지도와 패널 경계를 끌어 패널 너비를 조절할 수 있습니다. 지도에서 휠로 가리킨 곳을 확대·축소하고, 확대한 지도는 마우스로 끌어 이동합니다.</li><li>지도에서 위성·지상 노드에 마우스를 올려 정보를 읽습니다. ISLs, GSLs, Coverage, Active Routes, Labels 체크박스로 표시 항목을 조절합니다.</li><li>한 줄에 나란히 있는 출발지·목적지 필터로 관심 경로를 찾고 Recent Planned Routes 표에서 계획 경로를 확인합니다.</li></ol>
-<aside class="tip">CSV의 경로 번호와 위성 ID만으로는 위성의 좌표, 지상 노드의 이동, 전체 ISL·GSL, 수신 패킷 통계를 재구성할 수 없습니다. 전체 재생에는 실행 결과 폴더가 필요합니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#ini">← INI와 외부 일정 편집</a><a href="#metrics">수신 결과와 복구 지표 읽기 →</a></nav>
+<aside class="tip">CSV의 경로 번호와 위성 ID만으로는 위성의 좌표, 지상 노드의 이동, 전체 ISL·GSL, 수신 패킷 통계를 재구성할 수 없습니다. 전체 재생에는 실행 결과 폴더가 필요합니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#add-trial">← INI로 시험 추가</a><a href="#metrics">수신 결과와 복구 지표 읽기 →</a></nav>
 </section><section class="sheet" id="metrics" aria-labelledby="metrics-title">
 <div class="sheet-brand"><p class="kicker">사용자 설명서 · 08</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="metrics-title">수신 결과와 복구 지표 읽기</h2><p class="lead">지도와 경로 표는 계획 경로를, 수신 결과는 패킷이 실제로 처리된 시뮬레이션 결과를 보여줍니다.</p>
-<p>수신 결과의 주요 지표 8개는 패널이 넓으면 네 열 두 줄로 표시됩니다. 화면을 줄이거나 패널을 좁히면 두 열로 바뀝니다.</p>
+<div class="illustrated wide-image">
+<div><p>수신 결과의 주요 지표 8개는 패널이 넓으면 네 열 두 줄로 표시됩니다. 화면을 줄이거나 패널을 좁히면 두 열로 바뀝니다.</p>
 <ul><li><strong>시간별 그래프</strong>는 수신 결과의 자세한 결과 버튼으로 연 창에서 지표와 대상 통신을 선택해 시간에 따른 처리량·지연 등을 보는 곳입니다. 제어 지표는 전체 네트워크를 집계합니다.</li><li><strong>출발지·목적지별 수신</strong>은 각 노드 쌍의 전달률과 지연을 확인할 때 사용합니다.</li><li><strong>제어·계산·장애 복구</strong>는 알고리즘 비교 시 제어 메시지 전송량, 경로 계산 작업량, 장애 감지와 수신 재개 시점을 확인할 때 같은 창의 아래쪽을 봅니다.</li></ul>
-<p>경로 계산 시간은 실제 PC에서 각 작업에 걸린 누적 시간입니다. 상위 항목에 포함되는 세부 시간은 합산하지 않습니다. 링크 장애 기록에서 시뮬레이션 시각, 위성 링크, 단절·재연결, 감지와 정보 수렴을 확인할 수 있습니다. 영향받은 통신의 보기 버튼을 누르면 첫 수신과 안정 복구 시점 및 안정 복구 기준을 확인합니다.</p>
+<p>경로 계산 시간은 실제 PC에서 각 작업에 걸린 누적 시간입니다. 상위 항목에 포함되는 세부 시간은 합산하지 않습니다. 링크 장애 기록에서 시뮬레이션 시각, 위성 링크, 단절·재연결, 감지와 정보 수렴을 확인할 수 있습니다. 영향받은 통신의 보기 버튼을 누르면 첫 수신과 안정 복구 시점 및 안정 복구 기준을 확인합니다.</p></div>
 <figure><a href="assets/metrics.png" target="_blank" rel="noopener" aria-label="그림 4. 자세한 결과 창의 시간별 그래프, 수신 통계와 제어 계측 · 원본 보기"><img src="assets/metrics.png" alt="그림 4. 자세한 결과 창의 시간별 그래프, 수신 통계와 제어 계측"></a><figcaption>그림 4. 자세한 결과 창의 시간별 그래프, 수신 통계와 제어 계측</figcaption></figure>
-<table><thead><tr><th scope="col">항목</th><th scope="col">읽는 기준</th></tr></thead><tbody><tr><th scope="row">전달률</th><td>수신 ÷ 발생 × 100. 발생에는 위성 접속·초기 경로를 찾지 못한 시도도 포함</td></tr><tr><th scope="row">수신 지연·지터</th><td>수신한 패킷의 종단 간 지연과 그 변동. 수신이 없을 때 빈 값은 미관측</td></tr><tr><th scope="row">처리량</th><td>수신한 데이터 페이로드를 집계 시간으로 나눈 값. 그래프에서 시간별 변동 확인</td></tr><tr><th scope="row">첫 수신 / 안정 복구</th><td>장애 이후 생성된 첫 패킷의 수신 시각과, 이후 두 관측 구간에서 정해진 전달 기준을 만족한 시각을 각각 확인</td></tr><tr><th scope="row">제어 전송·정보 수렴</th><td>상태 전달에 사용한 전송량과 장애 정보가 대상 노드들에 반영되기까지의 시간</td></tr></tbody></table>
+</div>
+<table><thead><tr><th scope="col">항목</th><th scope="col">읽는 기준</th></tr></thead><tbody><tr><th scope="row">전송 중</th><td>시뮬레이션이 끝날 때까지 수신되거나 폐기되지 않은 패킷 수입니다. 큐 대기와 전송 중 패킷을 포함합니다.</td></tr><tr><th scope="row">전달률</th><td>수신 ÷ 발생 × 100. 발생에는 위성 접속·초기 경로를 찾지 못한 시도도 포함</td></tr><tr><th scope="row">수신 지연·지터</th><td>수신한 패킷의 종단 간 지연과 그 변동. 수신이 없을 때 빈 값은 미관측</td></tr><tr><th scope="row">처리량</th><td>수신한 데이터 페이로드를 집계 시간으로 나눈 값. 그래프에서 시간별 변동 확인</td></tr><tr><th scope="row">첫 수신 / 안정 복구</th><td>장애 이후 생성된 첫 패킷의 수신 시각과, 이후 두 관측 구간에서 정해진 전달 기준을 만족한 시각을 각각 확인</td></tr><tr><th scope="row">제어 전송·정보 수렴</th><td>상태 전달에 사용한 전송량과 장애 정보가 대상 노드들에 반영되기까지의 시간</td></tr></tbody></table>
 <aside class="tip">경로 표의 Predicted propagation은 계획 시점의 계산값입니다. 수신 지연에는 전송과 큐 처리 등이 반영되므로 수신 결과에서 확인합니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#playback">← 지도 재생과 결과 열기</a><a href="#compare">비교 실행과 반복 실험 →</a></nav>
 </section><section class="sheet" id="compare" aria-labelledby="compare-title">
 <div class="sheet-brand"><p class="kicker">사용자 설명서 · 09</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="compare-title">비교 실행과 반복 실험</h2><p class="lead">비교 실행은 새 결과를 계산합니다. 수신 결과의 실행 비교에서는 완료된 결과를 다시 비교합니다.</p>
-<figure><a href="assets/experiment.png" target="_blank" rel="noopener" aria-label="그림 5. 비교 실행에서 알고리즘과 반복 조건 선택 · 원본 보기"><img src="assets/experiment.png" alt="그림 5. 비교 실행에서 알고리즘과 반복 조건 선택"></a><figcaption>그림 5. 비교 실행에서 알고리즘과 반복 조건 선택</figcaption></figure>
-<ol><li>시험 조건을 선택하고 비교 실행을 누릅니다. 비교할 알고리즘을 체크합니다.</li><li>반복 횟수 1회·10회·30회를 고릅니다. 전체 실행 횟수는 선택한 알고리즘 수 × 반복 횟수입니다. 자동에서는 자원 여유에 따라 엔진을 최대 2개 실행합니다. 알고리즘별 실제 계산 시간을 비교할 때는 순차를 선택합니다.</li><li>필요하면 고급 설정에서 시작 시드, 준비 구간과 종료 관측 구간을 설정하고 실행합니다.</li><li>이전에 계산한 결과는 수신 결과 → 실행 비교에서 파일 또는 보관 이력으로 엽니다. 완료된 반복 결과는 반복 실험 → 통계 보기에서 확인합니다.</li></ol>
+<div class="illustrated">
+<div><ol><li>시험 조건을 선택하고 비교 실행을 누릅니다. 비교할 알고리즘을 체크합니다.</li><li>반복 횟수 1회·10회·30회를 고릅니다. 전체 실행 횟수는 선택한 알고리즘 수 × 반복 횟수입니다. 자동에서는 자원 여유에 따라 엔진을 최대 2개 실행합니다. 알고리즘별 실제 계산 시간을 비교할 때는 순차를 선택합니다.</li><li>필요하면 고급 설정에서 시작 시드, 준비 구간과 종료 관측 구간을 설정하고 실행합니다.</li><li>이전에 계산한 결과는 수신 결과 → 실행 비교에서 파일 또는 보관 이력으로 엽니다. 완료된 반복 결과는 반복 실험 → 통계 보기에서 확인합니다.</li></ol>
 <p>같은 시드의 알고리즘은 공통 송신 입력·장애 사건·SRD를 사용합니다. 준비 구간에서 생성된 패킷은 측정에서 제외되고, 종료 관측 구간에는 새 데이터 패킷 생성을 멈춥니다.</p>
-<aside class="tip">시드가 달라도 실제 입력이 고정되면 결정적 재현 시험에 해당합니다. 조건 다양성은 송신 부하, 장애 강도 또는 위성 구성을 바꾼 별도 시험에서 확인합니다.</aside><nav class="paging" aria-label="항목 이동"><a href="#metrics">← 수신 결과와 복구 지표 읽기</a><a href="#results">결과 보관과 문제 해결 →</a></nav>
+<aside class="tip">시드가 달라도 실제 입력이 고정되면 결정적 재현 시험에 해당합니다. 조건 다양성은 송신 부하, 장애 강도 또는 위성 구성을 바꾼 별도 시험에서 확인합니다.</aside></div>
+<figure><a href="assets/experiment.png" target="_blank" rel="noopener" aria-label="그림 5. 비교 실행에서 알고리즘과 반복 조건 선택 · 원본 보기"><img src="assets/experiment.png" alt="그림 5. 비교 실행에서 알고리즘과 반복 조건 선택"></a><figcaption>그림 5. 비교 실행에서 알고리즘과 반복 조건 선택</figcaption></figure>
+</div>
+<nav class="paging" aria-label="항목 이동"><a href="#metrics">← 수신 결과와 복구 지표 읽기</a><a href="#results">결과 보관과 문제 해결 →</a></nav>
 </section><section class="sheet" id="results" aria-labelledby="results-title">
 <div class="sheet-brand"><p class="kicker">사용자 설명서 · 10</p><img src="assets/Kari_logo.png" alt="한국항공우주연구원" width="2170" height="725"></div><h2 id="results-title">결과 보관과 문제 해결</h2><p class="lead">결과는 실행 ID 폴더 단위로 복사하면 다른 PC에서도 열 수 있습니다.</p>
 <table><thead><tr><th scope="col">파일 또는 폴더</th><th scope="col">보관 이유</th></tr></thead><tbody><tr><th scope="row">manifest.json</th><td>실행 식별자와 파일 해시. 나머지 파일과 함께 유지</td></tr><tr><th scope="row">config/ · inputs/ · normalized.json</th><td>당시 INI, 외부 입력, 실제 적용한 정규화 설정</td></tr><tr><th scope="row">routes.csv · summary.json</th><td>계획 경로와 패킷 수신·제어·계산 통계</td></tr><tr><th scope="row">timeseries.csv · network-events.jsonl</th><td>시간별 통계 및 장애·혼잡·제어 관련 기록</td></tr><tr><th scope="row">data/experiments/&lt;실험 ID&gt;</th><td>반복 실행 목록·공통 입력·통계. 관련 data/runs 폴더도 함께 보관</td></tr></tbody></table>

@@ -68,7 +68,7 @@ def _parse_ini_tree(entry_path):
         if not os.path.isfile(norm):
             raise ValueError(f"Missing INI include: {norm}")
         visited.add(norm)
-        for raw_line in Path(norm).read_text(encoding="utf-8").splitlines():
+        for raw_line in Path(norm).read_text(encoding="utf-8-sig").splitlines():
             line = _strip_comment(raw_line)
             if not line:
                 continue
@@ -91,10 +91,10 @@ def _parse_ini_tree(entry_path):
             k, v = [p.strip() for p in line.split("=", 1)]
             if k == "extends":
                 extends[cur_sec] = [x.strip() for x in v.split(",") if x.strip()]
-            elif k == "description" and is_root:
+            elif k in ("description", "displayName", "additional") and is_root:
                 cfg_obj = next((c for c in configs if c["name"] == cur_sec), None)
                 if cfg_obj is not None:
-                    cfg_obj["description"] = _unquote(v)
+                    cfg_obj[k] = _unquote(v) if k != "additional" else v.lower() == "true"
             else:
                 sections.setdefault(cur_sec, []).append((k, v))
         return cur_sec
@@ -135,14 +135,15 @@ def read_ini_config(config_name=None, entry_path=None, variables=None):
         for k,v in reversed(sections.get(sec,[])):
             if k in resolved:del resolved[k]
             resolved[k]={"k":k,"v":v,"sec":sec}
-    desc=next((c['description'] for c in configs if c['name']==active),'')
-    selectable=[c for c in configs if c['name']!='Dijkstra132Terminals' and dict(sections.get(c['name'],[])).get('abstract')!='true']
+    metadata = next((c for c in configs if c['name'] == active), {})
+    selectable=[c for c in configs if dict(sections.get(c['name'], [])).get('abstract', '').lower() != 'true']
     cfg = {
         "iniPath": entry_path or INI_PATH,
         "leoFound": bool(LEO_DIR),
         "leoDir": LEO_DIR,
         "activeConfig": active,
-        "description": desc,
+        "description": metadata.get("description", ""),
+        "displayName": metadata.get("displayName", ""),
         "extends": extends.get(active, []),
         "chain": chain,
         "configs": [{**c, "extends": extends.get(c["name"], [])} for c in selectable],

@@ -5,7 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from result_bundle import ini_dependencies, make_bundle, write_bundle, ENTRY
+from result_bundle import ini_dependencies, make_bundle, write_bundle, ENTRY, PREVIOUS_ENTRY, LEGACY_ENTRY
 
 class BundleTests(unittest.TestCase):
     def test_recursive_ini_preserves_bytes_and_relative_tree(self):
@@ -21,9 +21,15 @@ class BundleTests(unittest.TestCase):
             self.assertNotIn('src', [p.name for p in Path(tmp).iterdir()])
 
     def test_missing_cycles_and_external_includes_fail(self):
-        for source in [b'include missing.ini',b'include omnetpp.ini',b'include /absolute.ini',b'include ../../../../outside.ini']:
+        for source in [b'include missing.ini',b'include scenarios.ini',b'include /absolute.ini',b'include ../../../../outside.ini']:
             with self.subTest(source=source),self.assertRaises(ValueError):
                 ini_dependencies({ENTRY:source})
+
+    def test_prior_entry_names_are_preserved(self):
+        for entry in (PREVIOUS_ENTRY, LEGACY_ENTRY):
+            with self.subTest(entry=entry):
+                bundle, _ = make_bundle({entry: b'[General]'}, b'csv', 'Dijkstra132', 'model')
+                self.assertEqual(bundle['manifest']['entryIni'], 'config/' + entry)
 
     def test_each_run_gets_unique_id(self):
         files={ENTRY:b'[General]'}

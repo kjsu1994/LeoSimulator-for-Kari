@@ -32,7 +32,9 @@ def default_text(path,text,config):
     start,end=section_bounds(lines,config)
     first,last=section_bounds(source,config)
     newline='\r\n' if '\r\n' in text else '\n'
-    return ''.join(lines[:start]+[line.rstrip('\r\n')+newline for line in source[first:last]]+lines[end:])
+    metadata = [line for line in lines[start:end] if re.match(r'\s*(?:displayName|additional)\s*=', line)]
+    restored = metadata + source[first:last]
+    return ''.join(lines[:start] + [line.rstrip('\r\n') + newline for line in restored] + lines[end:])
 
 def read_preview(path,config,text):
     from tempfile import NamedTemporaryFile

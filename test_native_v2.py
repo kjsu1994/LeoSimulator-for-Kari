@@ -57,7 +57,7 @@ class IniV2Tests(unittest.TestCase):
             result=edit(ini,'A',{'csibEnabled':False},reader)
             self.assertEqual(result['controlMode'],'time')
             self.assertFalse(result['csibEnabled'])
-        for default in ('omnetpp.ini','omnetpp.defaults'):
+        for default in (Path(server.INI_PATH).name, Path(server.INI_PATH).with_suffix('.defaults').name):
             profile=server.read_ini_config('PaperS1McsrCsib',entry_path=str(Path(server.INI_PATH).with_name(default)))
             self.assertEqual(profile['controlMode'],'packet')
             self.assertTrue(profile['csibEnabled'])
@@ -159,7 +159,7 @@ class JobV2Tests(unittest.TestCase):
         from comparison import compare_bundles
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp);settings=base/'settings';shutil.copytree(server.LEO_DIR,settings)
-            ini=settings/'simulations/Network/omnetpp.ini'
+            ini=settings/'simulations/Network/scenarios.ini'
             (base/'engine').mkdir();shutil.copy2(Path(server.BASE_DIR)/'engine/engine.exe',base/'engine/engine.exe');shutil.copy2(Path(server.BASE_DIR)/'replay-model.json',base/'replay-model.json')
             reader=lambda name,variables=None:server.read_ini_config(name,entry_path=str(ini),variables=variables)
             edit(ini,'Dijkstra132',{'simTimeLimit':2,'startTime':0},reader)
@@ -171,7 +171,7 @@ class JobV2Tests(unittest.TestCase):
                 self.assertLess(time.monotonic(),deadline);time.sleep(.05)
             state=run_manager.state(identifier);self.assertEqual(state['status'],'completed',state.get('error'))
             bundle=state['result']['bundle'];self.assertEqual(bundle['manifest']['format'],'leo-native-replay-v4')
-            self.assertEqual(bundle['files']['config/simulations/Network/omnetpp.ini'].encode(),before)
+            self.assertEqual(bundle['files']['config/simulations/Network/scenarios.ini'].encode(),before)
             for name,digest in bundle['manifest']['files'].items():self.assertEqual(hashlib.sha256(bundle['files'][name].encode()).hexdigest(),digest)
             self.assertTrue(compare_bundles(bundle,bundle)['comparable'])
             pointer=(base/'data/latest.json').read_bytes();edit(ini,'Dijkstra132',{'simTimeLimit':1000000,'sendInterval':.00001},reader)

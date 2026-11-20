@@ -357,6 +357,8 @@ def start(base,settings,ini,name,read_config,variables=None,algorithms=None,rese
         folder=result_directory(base,results)/'experiments'/run_id
         selected=algorithms or [cfg['algorithm']];job['totalRuns']=len(selected)*len(seeds)
         manifest={'schema':2,'experimentId':run_id,'configName':name,'seeds':seeds,'algorithms':selected,'runs':job['completedRuns'],'status':'running'}
+        if cfg.get('displayName'):
+            manifest['displayName'] = cfg['displayName']
         records=[]
         manifest['executionMode']=mode
         manifest['peakWorkers']=0

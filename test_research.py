@@ -215,7 +215,7 @@ class ExperimentTests(unittest.TestCase):
         import shutil,time
         from comparison import compare_bundles
         with tempfile.TemporaryDirectory() as tmp:
-            base=Path(tmp);settings=base/'settings';ini=settings/'simulations/Network/omnetpp.ini';ini.parent.mkdir(parents=True)
+            base=Path(tmp);settings=base/'settings';ini=settings/'simulations/Network/scenarios.ini';ini.parent.mkdir(parents=True)
             ini.write_text('[General]\n*.numSatellites=12\n*.**.planeCount=4\n**.nrOfGS=2\n*.topologyControl.minimumElevation=-90\n[Config A]\nsim-time-limit=1s\n*.station[0].traffic.enabled=true\n*.station[0].traffic.dstStation=1\n*.station[0].traffic.startTime=0s\n*.islFailures.schedule="0-1@0.2+0.3"\n')
             (base/'engine').mkdir();shutil.copy2(Path(server.BASE_DIR)/'engine/engine.exe',base/'engine/engine.exe');shutil.copy2(Path(server.BASE_DIR)/'replay-model.json',base/'replay-model.json')
             reader=lambda name,variables=None:server.read_ini_config(name,entry_path=str(ini),variables=variables)

@@ -59,7 +59,7 @@ def runs(base,*,results=None):
     for p in sorted((result_directory(base,results)/'runs').glob('*/manifest.json'),key=lambda p:p.stat().st_mtime,reverse=True):
         try:
             m=completed_manifest(p.parent);s=p.parent/'summary.json'
-            if m.get('format') in ('leo-native-replay-v2','leo-native-replay-v3','leo-native-replay-v4') and s.is_file():out.append({'runId':m['runId'],'configName':m['configName'],'createdAt':m['createdAt'],'summary':json.loads(s.read_text())})
+            if m.get('format') in ('leo-native-replay-v2','leo-native-replay-v3','leo-native-replay-v4') and s.is_file():out.append({'runId':m['runId'],'configName':m['configName'],'displayName':m.get('displayName'),'createdAt':m['createdAt'],'summary':json.loads(s.read_text())})
         except (OSError,ValueError,KeyError):continue
     return out
 
@@ -77,7 +77,7 @@ def run_metadata(base,*,results=None):
                 summary = path.parent/'summary.json'
                 if summary.is_file():
                     algorithm = json.loads(summary.read_text(encoding='utf-8')).get('algorithm')
-            rows.append({'runId':run_id, 'configName':manifest['configName'],
+            rows.append({'runId':run_id, 'configName':manifest['configName'], 'displayName':manifest.get('displayName'),
                             'createdAt':str(manifest.get('createdAt') or ''), 'algorithm':algorithm})
         except (OSError, ValueError, TypeError, AttributeError, KeyError):
             continue

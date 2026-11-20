@@ -9,7 +9,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-ENTRY = "simulations/Network/omnetpp.ini"
+ENTRY = "simulations/Network/scenarios.ini"
+PREVIOUS_ENTRY = "simulations/Network/omnetpp.ini"
 LEGACY_ENTRY = "simulations/Dijkstra132/omnetpp.ini"
 FORMAT = "florasat-csv-ini-v1"
 PROFILE = "leo-dijkstra-delta-v1"
@@ -49,7 +50,7 @@ def ini_dependencies(files, entry=ENTRY):
 
 
 def make_bundle(inputs, csv_bytes, config_name, model_hash, *, run_id=None, command=None, provenance="captured-before-run", entry=None):
-    entry=entry or (ENTRY if ENTRY in inputs else LEGACY_ENTRY)
+    entry = entry or next((name for name in (ENTRY, PREVIOUS_ENTRY) if name in inputs), LEGACY_ENTRY)
     settings = ini_dependencies(inputs,entry)
     files = {"routes.csv": csv_bytes, **{"config/" + name: data for name, data in settings.items()}}
     identifier = run_id or uuid.uuid4().hex
@@ -119,6 +120,8 @@ def make_native_bundle(inputs, directory, config_name, model_hash, config, run_i
             for chunk in iter(lambda:stream.read(1048576),b''):h.update(chunk)
         m['attachments']={'events.csv':{'sha256':h.hexdigest(),'bytes':(directory/'events.csv').stat().st_size}}
     from comparison import fingerprint
+    if config.get('displayName'):
+        m['displayName'] = config['displayName']
     m['environmentHash']=fingerprint(config)
     for key,item in config.get('externalInputs',{}).items():
         files['inputs/'+key+('.json' if key=='scenarioFile' else '.csv')]=item['text'].encode('utf-8')

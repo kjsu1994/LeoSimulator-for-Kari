@@ -14,6 +14,10 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
   fs.mkdirSync(path.join(httpRoot,"manual/assets"),{recursive:true});
   for(const file of ["index.html","app.js","editor.js","orbit.js","csv.js","bundle.js","style.css","sim-ui.ico","data/earth.png",brandAsset])fs.copyFileSync(path.join(__dirname,file),path.join(httpRoot,file));
   fs.cpSync(path.join(__dirname,"settings"),path.join(httpRoot,"settings"),{recursive:true});
+  if(!stored){
+    fs.appendFileSync(path.join(httpRoot,"settings/simulations/Network/scenarios.ini"),
+      "\n[Config LabelFixture]\nextends = Dijkstra132\ndisplayName = \"내 설정 시험\"\nadditional = true\n[Config 까를로잇테스트]\nextends = LabelFixture\n");
+  }
   const referenceManifest=JSON.parse(fs.readFileSync(path.join(__dirname,"testdata/bundle/manifest.json"),"utf8")),referenceFiles={};
   for(const file of Object.keys(referenceManifest.files))referenceFiles[file]=fs.readFileSync(path.join(__dirname,"testdata/bundle",file),"utf8");
   const referenceResult={ok:true,runId:referenceManifest.runId,bundle:{manifest:referenceManifest,files:referenceFiles}};
@@ -23,7 +27,7 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
   }
   fs.writeFileSync(path.join(referenceFolder,"manifest.json"),JSON.stringify(referenceManifest));
   fs.writeFileSync(path.join(referenceFolder,"result.json"),JSON.stringify(referenceResult));fs.writeFileSync(path.join(httpRoot,"data/latest.json"),JSON.stringify({runId:referenceManifest.runId}));fs.writeFileSync(path.join(httpRoot,"data/latest_result.js"),"window.SIM_RESULT="+JSON.stringify(referenceResult)+";");
-  const server = spawn("python", ["-c", `import server,http.server,sys,os;server.BASE_DIR=sys.argv[1];server.LEO_DIR=os.path.join(server.BASE_DIR,'settings');server.INI_PATH=os.path.join(server.LEO_DIR,'simulations/Network/omnetpp.ini');http.server.ThreadingHTTPServer(('127.0.0.1',${port}),server.SimHandler).serve_forever()`,stored?__dirname:httpRoot], {cwd: __dirname, windowsHide:true, stdio:"ignore"});
+  const server = spawn("python", ["-c", `import server,http.server,sys,os;server.BASE_DIR=sys.argv[1];server.LEO_DIR=os.path.join(server.BASE_DIR,'settings');server.INI_PATH=os.path.join(server.LEO_DIR,'simulations/Network/scenarios.ini');http.server.ThreadingHTTPServer(('127.0.0.1',${port}),server.SimHandler).serve_forever()`,stored?__dirname:httpRoot], {cwd: __dirname, windowsHide:true, stdio:"ignore"});
   const appUrl = "http://127.0.0.1:"+port+"/";
   const browser = spawn("C:/Program Files/Google/Chrome/Application/chrome.exe", ["--headless=new", "--disable-extensions", "--disable-background-networking", "--no-first-run", `--remote-debugging-port=${port+1}`, `--user-data-dir=${profile}`, appUrl], {windowsHide:true, stdio:"ignore"});
   let ws;
@@ -80,6 +84,10 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     assert.equal(await evaluate("scenarioName('PaperS1MyCustom')"),"PaperS1MyCustom");
     assert.equal(await evaluate("byId('algorithmChoice').value"),"dijkstra-delay");
     assert(await evaluate("cfgNameSel.options.length<12"));
+    assert(await evaluate("cfgNameSel.querySelector('option[value=까를로잇테스트]').textContent === '까를로잇테스트'"));
+    assert.equal(await evaluate("!!cfgNameSel.querySelector('option[value=LabelFixture]')"),false);
+    await evaluate("byId('showAllConfigs').checked=true;byId('showAllConfigs').onchange()");
+    assert.equal(await evaluate("cfgNameSel.querySelector('option[value=LabelFixture]').textContent"),"내 설정 시험");
     await evaluate("simTime=300.5;render()");
     assert.equal(await evaluate("stateAt(simTime).t"),300.5);
     assert.equal(await evaluate("document.getElementById('kpiSat').textContent"),"132 / 264");
@@ -180,6 +188,7 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     const script="import sys,pathlib,shutil,json; import server,run_manager; b=pathlib.Path(sys.argv[1]); (b/'engine').mkdir();shutil.copy2(pathlib.Path(server.BASE_DIR)/'engine/engine.exe',b/'engine/engine.exe');shutil.copy2(pathlib.Path(server.BASE_DIR)/'replay-model.json',b/'replay-model.json');c=server.read_ini_config('Mcsr132');c['simTimeLimit']=2;[s.update(startTime=0) for s in c['stations']];inputs={p.relative_to(server.LEO_DIR).as_posix():p.read_bytes() for p in pathlib.Path(server.LEO_DIR).rglob('*.ini')};r=run_manager.execute(b,server.LEO_DIR,server.INI_PATH,'Mcsr132',server.read_ini_config,frozen=(c,inputs));(b/'browser-result.json').write_text(json.dumps(r),encoding='utf-8')";
     const run=require('node:child_process').spawnSync('python',['-c',script,nativeFolder],{cwd:__dirname,windowsHide:true,encoding:'utf8',timeout:30000});assert.equal(run.status,0,run.stderr);
     const nativeResult=JSON.parse(fs.readFileSync(path.join(nativeFolder,'browser-result.json'),'utf8'));
+    assert.equal(nativeResult.bundle.manifest.displayName, "기본 통신 · MCSR-LS");
     await evaluate(`openResultBundle(${JSON.stringify(nativeResult.bundle)})`);
     assert(await evaluate("!byId('nativeMetrics').hidden && byId('metricValues').children.length===8 && resultMeta.summary.received>0"));
     assert(await evaluate(`(()=>{
@@ -266,7 +275,7 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     assert.equal(await evaluate("document.getElementById('cfgName').checkVisibility()"),false);
     assert.equal(await evaluate("document.getElementById('runnerActions').checkVisibility()"),false);
     assert(await evaluate("(()=>{let picked=false;byId('resultFolder').click=()=>{picked=true;};byId('btnOpenResult').click();delete byId('resultFolder').click;return picked&&!byId('resultDialog').open;})()"));
-    assert.equal(await evaluate("document.getElementById('savedConfigName').textContent"),"기본 통신");
+    assert.equal(await evaluate("document.getElementById('savedConfigName').textContent"),referenceManifest.configName);
     assert.equal(await evaluate("document.getElementById('btnOpenIni').checkVisibility()"),false);
     await evaluate("document.getElementById('btnOpenIni').click()");
     assert(await evaluate("document.getElementById('runStatus').textContent.includes('start_ui.bat')"));

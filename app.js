@@ -32,7 +32,7 @@ function installResult(result) {
   simTime = Math.min(1210, result.replay ? result.config.simTimeLimit : (states.length ? states[states.length - 1].t : 0));
   applyLoadedConfig(result.config, { result: true });
   syncTimeBounds(result.replay ? result.config.simTimeLimit : (states.length ? states[states.length - 1].t : 0));
-  setStatus(`${scenarioName(result.config.activeConfig)} · ${algorithmName(result.config)} 실행 결과를 불러왔습니다.`);
+  setStatus(`${scenarioName(result.config.activeConfig, result.config.displayName)} · ${algorithmName(result.config)} 실행 결과를 불러왔습니다.`);
   render();
   window.dispatchEvent(new CustomEvent("sim-result",{detail:result}));
 }
@@ -320,7 +320,7 @@ function render() {
   document.getElementById("mapSatellites").textContent = snapshot ? `${sats.length.toLocaleString("ko-KR")}기` : "—";
   document.getElementById("mapIsl").textContent = snapshot ? `${islCount.toLocaleString("ko-KR")}개` : "—";
   document.getElementById("mapGroundLinks").textContent = snapshot ? `${gslLinks.length.toLocaleString("ko-KR")}개` : "—";
-  document.getElementById("mapRouting").textContent = `${scenarioName(resultMeta?.config.activeConfig || previewConfig?.activeConfig || "CSV")} · ${algorithmName(resultMeta?.config||previewConfig)}${resultMeta?.summary?.experimental?" · 환경/실험 설정":""}`;
+  document.getElementById("mapRouting").textContent = `${scenarioName(resultMeta?.config.activeConfig || previewConfig?.activeConfig || "CSV", (resultMeta?.config || previewConfig)?.displayName)} · ${algorithmName(resultMeta?.config||previewConfig)}${resultMeta?.summary?.experimental?" · 환경/실험 설정":""}`;
   document.getElementById("mapSample").textContent = snapshot && !resultMeta ? "설정 미리보기 · 실행 결과와 별도" : snapshot ? (snapshot.reconstructed ? "설정 기반 재현 · 기록된 경로" : `Engine sample: ${snapshot.t.toFixed(3)} s | no interpolation`) : "No engine state for this data";
 
   document.getElementById("timeLabel").textContent = `t = ${playbackTime(simTime)} s`;
@@ -525,30 +525,23 @@ function setStatus(msg) {
   if (!runActivity.classList.contains("running")) showRunActivity(msg);
 }
 
-const SCENARIO_NAMES={
-  Dijkstra132:"기본 통신",Dijkstra132Pair:"단일 구간 통신",Dijkstra132StationsOnly:"지상국 간 통신",Dijkstra132PairFail:"반복 링크 장애",Dijkstra132RandomFail:"무작위 링크 장애",
-  PaperS1:"대규모 단일 구간",PaperS1Load:"대규모 부하",PaperS1DijkstraCutFlood:"대규모 장애·복구"
-};
-const ADDITIONAL_CONFIGS=new Set("Dijkstra132Hop Mcsr132 Mcsr132TS Mcsr132HR Mcsr132Pair Mcsr132PairFail Mcsr132RandomFail PaperS1Mcsr PaperS1McsrTS PaperS1McsrHR PaperS1Dijkstra PaperS1McsrFail PaperS1DijkstraFail PaperS1McsrCut PaperS1DijkstraCut PaperS1McsrCongestion PaperS1DijkstraCongestion PaperS1DijkstraCongestionAware PaperS1McsrCutFlood PaperS1McsrCutFloodRes PaperS1DijkstraCutFloodLoad PaperS1McsrCutFloodLoad PaperS1McsrCutFloodResLoad PaperS1McsrCsib".split(" "));
 const ALGORITHM_NAMES={"dijkstra-delay":"Dijkstra · 지연 최소","dijkstra-hop":"Dijkstra · 홉 최소","mcsr-ls":"MCSR · 지연 우선 (LS)","mcsr-ts":"MCSR · 처리량 우선 (TS)","mcsr-hr":"MCSR · 신뢰성 우선 (HR)"};
-function scenarioName(name){
-  if(SCENARIO_NAMES[name])return SCENARIO_NAMES[name];
-  if(!ADDITIONAL_CONFIGS.has(name))return name||"결과를 선택하세요";
-  const base=name.startsWith("PaperS1")?"대규모 ":"";
-  const kind=name.includes("CongestionAware")?"혼잡 · 지연 반영":name.includes("Congestion")?"혼잡":name.includes("CutFloodResLoad")?"장애·복구 · 예비 경로·배경 부하":name.includes("CutFloodLoad")?"장애·복구 · 배경 부하":name.includes("CutFloodRes")?"장애·복구 · 예비 경로":name.includes("CutFlood")?"장애·복구":name.includes("PairFail")||name.includes("Cut")?"반복 링크 장애":name.includes("Fail")?"무작위 링크 장애":name.includes("Csib")?"DS·CSIB":name.includes("Pair")?"단일 구간 통신":"기본 통신";
-  return base+kind;
+let configuredScenarios = [];
+function scenarioName(name, displayName){
+  return displayName || configuredScenarios.find(c => c.name === name)?.displayName || name || "결과를 선택하세요";
 }
 function algorithmName(cfg){return ALGORITHM_NAMES[cfg?.algorithm]||cfg?.algorithm||ALGORITHM_NAMES["dijkstra-"+(cfg?.metric||"delay")];}
 let selectedConfig=null,configSaving=false,configLoading=false;
 function populateConfigChoices(cfg){
   const all=document.getElementById("showAllConfigs").checked;
   cfgNameSel.replaceChildren();
-  for(const c of cfg.configs||[]){
-    const basic=Object.hasOwn(SCENARIO_NAMES,c.name),custom=!ADDITIONAL_CONFIGS.has(c.name);
-    if(!all&&!basic&&!custom&&c.name!==cfg.activeConfig)continue;
-    const opt=new Option(scenarioName(c.name)+(basic||custom?"":` (${c.name})`),c.name);opt.title=c.name;cfgNameSel.add(opt);
+  const choices = configuredScenarios.length ? configuredScenarios : cfg.configs || [];
+  const active = choices.some(c => c.name === cfg.activeConfig) ? cfg.activeConfig : choices[0]?.name;
+  for(const c of choices){
+    if(!all && c.additional && c.name !== active)continue;
+    const opt=new Option(scenarioName(c.name, c.displayName),c.name);opt.title=c.name;cfgNameSel.add(opt);
   }
-  cfgNameSel.value=cfg.activeConfig;
+  cfgNameSel.value=active || "";
 }
 document.getElementById("showAllConfigs").onchange=()=>{if(selectedConfig)populateConfigChoices(selectedConfig);};
 // This changes only the algorithm in the selected INI section, never the recorded result.
@@ -596,7 +589,7 @@ function updateProfileBox(cfg) {
   const meaning=document.getElementById("scenarioMeaning");
   meaning.textContent=scenarioMeaning(cfg);
   meaning.hidden=!meaning.textContent;
-  document.getElementById("savedConfigName").textContent = scenarioName(cfg.activeConfig);
+  document.getElementById("savedConfigName").textContent = scenarioName(cfg.activeConfig, cfg.displayName);
   const entries = cfg.effectiveEntries || [];
   const value = key => entries.find(e => e.k === key)?.v;
   document.getElementById("scenarioConstellation").textContent = cfg.numSatellites == null ? "—" : `${cfg.numSatellites}기 · ${cfg.planes}개 궤도면`;
@@ -626,6 +619,7 @@ function applyLoadedConfig(cfg, opts = {}) {
     document.getElementById("workspacePath").textContent=cfg.workspacePath||"";
     if(!workspaceChangePending)setWorkspaceNotice(cfg.workspaceNotice||"");
   }
+  if (!opts.result) configuredScenarios = cfg.configs || [];
   selectedConfig=cfg;
   const algorithmChoice=document.getElementById("algorithmChoice");
   algorithmChoice.replaceChildren();
@@ -640,7 +634,7 @@ function applyLoadedConfig(cfg, opts = {}) {
   const resultKey = resultMeta ? JSON.stringify([resultMeta.config.activeConfig, resultMeta.config.effectiveEntries]) : "";
   const showingPreviousRun = !!resultMeta && !opts.result && resultKey !== configKey;
   if (showingPreviousRun) {
-    setStatus(`지도에는 [${scenarioName(resultMeta.config.activeConfig)} · ${algorithmName(resultMeta.config)}]의 마지막 실행 결과가 표시됩니다. 선택한 [${scenarioName(cfg.activeConfig)} · ${algorithmName(cfg)}] 설정을 반영하려면 실행하세요.`);
+    setStatus(`지도에는 [${scenarioName(resultMeta.config.activeConfig, resultMeta.config.displayName)} · ${algorithmName(resultMeta.config)}]의 마지막 실행 결과가 표시됩니다. 선택한 [${scenarioName(cfg.activeConfig, cfg.displayName)} · ${algorithmName(cfg)}] 설정을 반영하려면 실행하세요.`);
   }
   loadedConfigKey = configKey;
   if (opts.result || !resultMeta) {
@@ -651,14 +645,14 @@ function applyLoadedConfig(cfg, opts = {}) {
   }
 
   const active = resultMeta?.config.activeConfig || cfg.activeConfig || cfgNameSel.value;
-  document.title = `LEO Network Simulator (${scenarioName(active)})`;
+  document.title = `LEO Network Simulator (${scenarioName(active, (resultMeta?.config || cfg).displayName)})`;
 
 
   window.dispatchEvent(new CustomEvent("sim-config",{detail:cfg}));
   updateProfileBox(cfg);
 
   if (opts.announce && !showingPreviousRun) {
-    setStatus(`${scenarioName(cfg.activeConfig)} · ${algorithmName(cfg)} 설정을 불러왔습니다.`);
+    setStatus(`${scenarioName(cfg.activeConfig, cfg.displayName)} · ${algorithmName(cfg)} 설정을 불러왔습니다.`);
   }
   render();
 }
@@ -882,7 +876,7 @@ document.getElementById("btnOpenResult").onclick = async () => {
       const date = new Date(row.createdAt);
       const time = row.createdAt && Number.isFinite(date.getTime()) ? date.toLocaleString("ko-KR") : "시각 기록 없음";
       const algorithm = row.algorithm ? algorithmName({algorithm:row.algorithm}) : "알고리즘 기록 없음";
-      const label = [scenarioName(row.configName), algorithm, time].join(" · ");
+      const label = [scenarioName(row.configName, row.displayName), algorithm, time].join(" · ");
       return {...row,label:label + " · " + row.runId.slice(-8),search:[label,row.configName,row.runId,row.algorithm].join(" ").toLowerCase()};
     });
     resultSearch.disabled = false;

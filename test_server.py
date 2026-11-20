@@ -218,7 +218,7 @@ class DataTests(unittest.TestCase):
             (root/"engine").mkdir()
             shutil.copy2(Path(server.BASE_DIR,"engine/engine.exe"),root/"engine/engine.exe")
             shutil.copy2(Path(server.BASE_DIR,"replay-model.json"),root/"replay-model.json")
-            with patch.object(server,"BASE_DIR",tmp),patch.object(server,"LEO_DIR",str(root/"settings")),patch.object(server,"INI_PATH",str(root/"settings/simulations/Network/omnetpp.ini")):
+            with patch.object(server,"BASE_DIR",tmp),patch.object(server,"LEO_DIR",str(root/"settings")),patch.object(server,"INI_PATH",str(root/"settings/simulations/Network/scenarios.ini")):
                 result=server.run_simulation("Dijkstra132")
             self.assertEqual(result["bundle"]["manifest"]["engine"]["id"],"leo-native")
             self.assertTrue((root/"data/runs"/result["runId"]/"routes.csv").is_file())
@@ -235,7 +235,7 @@ class DataTests(unittest.TestCase):
         import shutil
         with tempfile.TemporaryDirectory() as tmp:
             settings=Path(tmp)/'settings';shutil.copytree(Path(server.LEO_DIR),settings)
-            ini=settings/'simulations/Network/omnetpp.ini'
+            ini=settings/'simulations/Network/scenarios.ini'
             read=lambda name:server.read_ini_config(name,entry_path=str(ini))
             edit(ini,'Dijkstra132',{'algorithm':'dijkstra-delay'},read)
             self.assertEqual(read('Dijkstra132Hop')['algorithm'],'dijkstra-hop')
@@ -249,7 +249,7 @@ class DataTests(unittest.TestCase):
         from config_editor import edit,preview_defaults
         with tempfile.TemporaryDirectory() as tmp:
             settings=Path(tmp)/'settings';shutil.copytree(Path(server.LEO_DIR),settings)
-            ini=settings/'simulations/Network/omnetpp.ini'
+            ini=settings/'simulations/Network/scenarios.ini'
             read=lambda name:server.read_ini_config(name,entry_path=str(ini))
             edit(ini,'Dijkstra132',{'altitude':605},read)
             edit(ini,'Dijkstra132PairFail',{'altitude':650,'senders':[0,1],'sendInterval':.08},read)
