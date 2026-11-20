@@ -106,7 +106,7 @@ seed-0-mt = 23542
 
 ### ISL 개폐 일정
 
-`scheduled` 모드에서는 UI의 일정 가져오기 또는 `*.native.islScheduleFile`로 CSV를 지정합니다. 상대 경로는 진입 INI 파일이 있는 폴더를 기준으로 해석합니다.
+기존 시나리오에 저장된 일정과 INI에서 지정한 CSV를 사용할 수 있습니다. INI에서 개폐 일정을 지정할 때는 `*.native.islMode = "scheduled"`를 설정하고 `*.native.islScheduleFile`에 CSV 경로를 적습니다. 조건 수정 화면에는 저장된 개폐 일정이나 장애 기록이 적용될 때만 상태가 표시됩니다. CSV 상대 경로는 진입 INI 파일이 있는 폴더를 기준으로 해석합니다.
 
 ```csv
 time,event,satA,satB

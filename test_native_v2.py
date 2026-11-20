@@ -61,6 +61,23 @@ class IniV2Tests(unittest.TestCase):
             profile=server.read_ini_config('PaperS1McsrCsib',entry_path=str(Path(server.INI_PATH).with_name(default)))
             self.assertEqual(profile['controlMode'],'packet')
             self.assertTrue(profile['csibEnabled'])
+    def test_edit_keeps_saved_link_schedules(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);ini=root/'omnetpp.ini'
+            ini.write_text('[General]\n*.numSatellites=12\n*.**.planeCount=4\n**.nrOfGS=2\n'
+                           '[Config A]\n*.station[0].traffic.enabled=true\n*.station[0].traffic.dstStation=1\n'
+                           '*.native.islMode="scheduled"\n*.native.islScheduleFile="links.csv"\n'
+                           '*.islFailures.replayFile="failures.csv"\n')
+            (root/'links.csv').write_bytes('\ufefftime,event,satA,satB\r\n1,down,0,1\r\n2,up,0,1\r\n'.encode('utf-8'))
+            (root/'failures.csv').write_text('time,event,satA,satB\n3,failure,1,2\n4,restore,1,2\n')
+            reader=lambda name:server.read_ini_config(name,entry_path=str(ini))
+            before=load_external_inputs(reader('A'),ini)
+            edit(ini,'A',{'queueCapacity':20},reader)
+            after=load_external_inputs(reader('A'),ini)
+            self.assertEqual(after['islMode'],'scheduled')
+            self.assertEqual([row['event'] for row in before['scheduledEvents']],['failure','restore'])
+            self.assertEqual(after['scheduledEvents'],before['scheduledEvents'])
+            self.assertEqual(after['failureReplayEvents'],before['failureReplayEvents'])
     def test_environment_fingerprint_excludes_algorithm_but_not_queue(self):
         a=server.read_ini_config('Dijkstra132');b=copy.deepcopy(a);b['algorithm']='mcsr-hr'
         self.assertEqual(fingerprint(a),fingerprint(b));b['queueCapacity']+=1

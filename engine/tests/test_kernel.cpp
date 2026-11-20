@@ -8,7 +8,7 @@ int main(int argc,char **argv){
   auto config=[](){J station={{"lat",0},{"lon",0},{"enabled",false},{"mobile",false},{"packetSize",976},{"sendInterval",1.}};
     return J{{"numSatellites",12},{"planes",4},{"phasing",1},{"altitude",550},{"inclination",53},{"simTimeLimit",5.},{"minimumElevation",10.},{"algorithm","dijkstra-delay"},{"controlMode","time"},{"stations",J::array({station,station})},{"queueCapacity",1}};};
   for(int variant=0;variant<5;variant++){
-    Simulation sim(config(),out);while(!sim.events.empty())sim.events.pop();sim.now=0;sim.sequence=0;
+    Simulation sim(config(),out);sim.events.clear();sim.now=0;sim.sequence=0;
     for(auto &row:sim.links)row.clear();Link link;link.a=0;link.b=13;link.active=true;link.prop=.01;link.rate=8000;sim.links[0][13]=link;
     auto &stats=sim.flows[{0,1}];stats.attempted=stats.sent=variant==0?3:1;
     auto send=[&](int id){auto p=std::make_shared<Packet>();p->id=id;p->source=0;p->dest=1;p->bytes=976;sim.transmit(p,0,13);};
@@ -33,7 +33,7 @@ int main(int argc,char **argv){
   assert((plan.path==std::vector<int>{0,1,2}));assert(std::abs(plan.delay-.0035)<1e-12);
   {
     auto c=config();c["failureSchedule"]="0-1@1";c["maxHops"]=0;
-    Simulation sim(c,out);while(!sim.events.empty())sim.events.pop();
+    Simulation sim(c,out);sim.events.clear();
     sim.lastPaths[{0,1}]={2,3};
     sim.lastPaths[{1,0}]={0,1};
     auto packet=std::make_shared<Packet>();packet->source=0;packet->dest=1;

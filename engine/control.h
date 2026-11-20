@@ -3,9 +3,19 @@
 #include <unordered_map>
 // Explicit experimental wire protocol; no estimated-time delivery shortcuts.
 struct ControlAssembly {
-  std::vector<bool> parts;int received=0;bool started=false,failed=false,done=false;
-  bool accept(int part){if(failed||done||part<0||part>=int(parts.size())||parts[part])return false;
-    parts[part]=true;done=++received==int(parts.size());return done;}
+  explicit ControlAssembly(int fragments):parts(fragments>1?fragments:0,false),fragments(fragments) {}
+  std::vector<bool> parts;
+  const int fragments;
+  int received=0;bool started=false,failed=false,done=false;
+  bool accept(int part) {
+    if(failed||done||part<0||part>=fragments)return false;
+    if(fragments>1) {
+      if(parts[part])return false;
+      parts[part]=true;
+    }
+    done=++received==fragments;
+    return done;
+  }
 };
 struct LinkReport { int a,b; bool up=true; double extra=0,A=1,J=0; };
 inline unsigned long long controlHashMix(unsigned long long x) {
@@ -46,7 +56,7 @@ public:
   std::map<std::string,long long> generatedByKind,droppedByReason;
   std::map<std::string,ControlCounts> byKind;
 private:
-  int n;J cfg; unsigned long long nonce=0,roundId=0;
+  int n;J cfg;const bool hierarchicalRouting;unsigned long long nonce=0,roundId=0;
   std::vector<std::vector<int>> neighbors,members;
   std::vector<int> region,ds,knownOwner;std::vector<unsigned long long> ownerRevision;
   std::vector<std::map<int,double>> heard;
@@ -114,7 +124,7 @@ private:
     metricDirty[u]=metricDirty[u]||metrics;
     auto a=std::make_shared<Advertisement>(u,++versions[u],now(),std::move(rows));local[u]=a;apply(u,{a});return a;
   }
-  bool hierarchical()const{return cfg.value("csibEnabled",false)&&cfg.value("algorithm",std::string()).find("mcsr-")==0;}
+  bool hierarchical()const{return hierarchicalRouting;}
   void announce(int u,unsigned long long round=0,bool voting=false) {
     auto observed=observe(u,round>0);auto fresh=std::make_shared<Advertisement>(*observed);fresh->version=++versions[u];fresh->observedAt=now();local[u]=fresh;apply(u,{fresh});auto a=local[u];statusDirty[u]=metricDirty[u]=false;emit(make(hierarchical()?(voting?"vote":"report"):"lsa",u,hierarchical()?knownOwner[u]:-1,hierarchical()?region[u]:-1,{a},round));
   }
@@ -168,7 +178,7 @@ public:
     std::function<double()> clock,std::function<void(double,std::function<void()>)> timer,
     std::function<void(int,int,Msg,int)> tx,std::function<std::vector<LinkReport>(int)> measure,
     std::function<void(J)> event,std::function<int(int,int)> vote,std::function<double(int,int)> delay,std::function<long()> geometry)
-    :views(nodes),n(nodes),cfg(std::move(config)),neighbors(n),region(std::move(partition)),ds(std::move(owners)),heard(n),versions(n),statusDirty(n,false),metricDirty(n,false),local(n),initial(n),seen(n),now(clock),schedule(timer),send(tx),sample(measure),record(event),elect(vote),propagation(delay),geometryRevision(geometry) {
+    :views(nodes),n(nodes),cfg(std::move(config)),hierarchicalRouting(cfg.value("csibEnabled",false)&&cfg.value("algorithm",std::string()).find("mcsr-")==0),neighbors(n),region(std::move(partition)),ds(std::move(owners)),heard(n),versions(n),statusDirty(n,false),metricDirty(n,false),local(n),initial(n),seen(n),now(clock),schedule(timer),send(tx),sample(measure),record(event),elect(vote),propagation(delay),geometryRevision(geometry) {
     if(region.empty()){region.assign(n,0);ds={0};}
     members.resize(ds.size());collecting.resize(ds.size());for(int u=0;u<n;u++)members.at(region[u]).push_back(u);for(size_t k=0;k<ds.size();k++)if(ds[k]<0)ds[k]=members[k].front();knownOwner.resize(n);ownerRevision.assign(n,0);for(int u=0;u<n;u++)knownOwner[u]=ds[region[u]];
     for(auto [a,b]:edges){neighbors[a].push_back(b);neighbors[b].push_back(a);heard[a][b]=heard[b][a]=0;}

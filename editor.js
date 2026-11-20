@@ -25,11 +25,8 @@ const settingHelp={
   minimumElevation:"지상에서 위성이 이 각도 이상 보여야 연결됩니다. 값을 높이면 접속 기회가 줄어들 수 있습니다.",
   queueCapacity:"링크에서 대기할 수 있는 패킷 수입니다. 상한에 도달하면 새 패킷을 폐기하며, 0은 무제한입니다.",
   updateInterval:"위치와 연결을 다시 계산하는 간격입니다. 줄이면 연결 변화를 더 촘촘히 반영하고 계산량이 늘어날 수 있습니다.",
-  islMode:"고정 격자는 기본 위성 연결을 사용합니다. 계획된 개폐는 가져온 일정에 따라 해당 링크를 끊고 복구합니다.",
-  islScheduleFile:"계획된 링크 개폐를 읽는 기존 파일 경로입니다.",
   failureSchedule:"예를 들어 route@60+30은 60초에 기준 경로의 링크를 30초간 끊습니다. 12-13@60+30처럼 링크를 직접 지정할 수도 있습니다.",
   failureKnowledge:"시간 모델에서 장애 정보를 즉시 반영하거나 감지·전파 시간이 흐른 뒤 반영합니다.",
-  failureReplay:"과거 장애 일정을 다시 적용할 파일의 경로입니다.",
   randomFailures:"지정 구간에서 생성할 무작위 링크 장애의 수입니다. 0이면 생성하지 않습니다.",
   randomStart:"무작위 장애가 처음 발생할 수 있는 시각입니다.",
   randomEnd:"무작위 장애를 발생시킬 구간의 마지막 시각입니다.",
@@ -169,6 +166,11 @@ function openSettings(cfg,resetDefaults=false){
 
   nativeUI.config=cfg;nativeUI.scenario=structuredClone(cfg.scenario||{schema:1,method:"environment",entries:[]});nativeUI.entryIndex=-1;
   const container=byId("settingsFields");container.replaceChildren();byId("settingsError").textContent="";
+  const savedSchedules=[
+    cfg.islMode==="scheduled" && "저장된 위성 간 링크 개폐 일정 적용 중",
+    cfg.failureReplayEvents?.length && "저장된 장애 기록 적용 중"
+  ].filter(Boolean);
+  if(savedSchedules.length)container.append(node("p",{id:"settingsSavedSchedules",class:"model-status"},savedSchedules.join(" · ")));
   const [basic,grid]=group("기본 설정",true);container.append(basic);
   grid.append(control("알고리즘","edit-algorithm",cfg.algorithm,"select",cfg.capabilities.algorithms));
   byId("edit-algorithm").closest("label").hidden=true;
@@ -176,11 +178,8 @@ function openSettings(cfg,resetDefaults=false){
   const addField=(grid,f)=>grid.append(control(f.label,"edit-"+f.key,cfg[f.key],"number",{min:f.min,max:f.max,step:f.type==="int"?"1":"any"}));
   for(const f of cfg.capabilities.fields.filter(f=>basicKeys.includes(f.key)))addField(grid,f);
   const [models,mg]=group("모델 검증");container.append(models);
-  for(const [key,label,choices]of [["processingMode","처리 지연",{neutral:"추가 지연 없음",assumed:"가정값 적용"}],["controlMode","제어 통신",{packet:"실제 패킷",time:"시간 가정"}],["jitterModel","지터",{packet:"실제 지연 변동",cost:"라우팅 비용 주입"}],["islMode","ISL 연결",{fixed:"고정 격자",scheduled:"계획된 개폐"}]])mg.append(control(label,"edit-"+key,cfg[key]||Object.keys(choices)[0],"select",choices));
+  for(const [key,label,choices]of [["processingMode","처리 지연",{neutral:"추가 지연 없음",assumed:"가정값 적용"}],["controlMode","제어 통신",{packet:"실제 패킷",time:"시간 가정"}],["jitterModel","지터",{packet:"실제 지연 변동",cost:"라우팅 비용 주입"}]])mg.append(control(label,"edit-"+key,cfg[key]||Object.keys(choices)[0],"select",choices));
   for(const [key,label]of [["controlRefresh","제어 갱신 (s)"],["controlTimeout","수집 제한 시간 (s)"],["controlHeaderBytes","제어 헤더 (B)"],["controlRecordBytes","상태 레코드 (B)"],["controlMtu","제어 MTU (B)"],["controlReassemblyTimeout","재조립 제한 (s)"],["controlResyncInterval","재동기화 주기 (s)"]])mg.append(control(label,"edit-"+key,cfg[key],"number",{min:key==="controlMtu"?64:key.endsWith("Bytes")?1:1e-11,step:key.endsWith("Bytes")||key==="controlMtu"?1:"any"}));
-  const scheduleLabel=node("label",{class:"file-btn"},"ISL 개폐 일정 가져오기"),scheduleFile=node("input",{type:"file",accept:".csv",hidden:true});scheduleLabel.append(scheduleFile);mg.append(scheduleLabel);
-  scheduleFile.onchange=async()=>{try{nativeUI.scenario.scheduled_events=readEventCsv(await scheduleFile.files[0].text());byId("edit-islMode").value="scheduled";scheduleLabel.firstChild.textContent=`ISL 일정 ${nativeUI.scenario.scheduled_events.length}개`;byId("settingsError").textContent="";}catch(e){byId("settingsError").textContent=e.message;}};
-  if(cfg.islScheduleFile)mg.append(control("기존 일정 경로","edit-islScheduleFile",cfg.islScheduleFile,"text"));
   const [traffic,tf]=group("트래픽",true);container.append(traffic);
   const enabled=cfg.stations.filter(s=>s.enabled);const first=enabled[0]||cfg.stations[0];
   const senderWrap=node("details",{class:"sender-list"});senderWrap.append(node("summary",{},`송신 노드 (${enabled.length}개 선택)`));
@@ -219,9 +218,6 @@ function openSettings(cfg,resetDefaults=false){
   ff.append(control("장애 정보 전달","edit-failureKnowledge",cfg.failureKnowledge,"select",{instant:"즉시",propagate:"감지·전파 후"}));
   for(const f of cfg.capabilities.fields.filter(f=>["slsInterval","slsMissCount","floodHopDelay","spfDelay"].includes(f.key)))addField(ff,f);
   for(const [key,label]of Object.entries({randomFailures:"무작위 장애 수",randomStart:"시작 (s)",randomEnd:"종료 (s)",randomDuration:"복구까지 (s, 0=영구)",failureSeed:"장애 시드"}))ff.append(control(label,"edit-"+key,cfg[key]));
-  const importFault=node("label",{class:"file-btn"},"장애 기록 가져오기");const faultFile=node("input",{type:"file",accept:".csv",hidden:true});importFault.append(faultFile);ff.append(importFault);
-  faultFile.onchange=async()=>{try{const text=await faultFile.files[0].text();const rows=text.trim().split(/\r?\n/);if(rows.shift()!=="time,event,satA,satB")throw Error("장애 CSV 형식을 확인하세요.");nativeUI.scenario.failure_events=rows.map(s=>{const[t,event,a,b]=s.split(",");return{time:Number(t),event,a:Number(a),b:Number(b)};});setStatus(`장애 기록 ${rows.length}개를 설정에 포함합니다.`);}catch(e){byId("settingsError").textContent=e.message;}};
-  if(cfg.failureReplay)ff.append(control("기존 장애 기록 경로","edit-failureReplay",cfg.failureReplay,"text"));
   const [congestion,cg]=group("혼잡·환경 효과");container.append(congestion);
   cg.classList.add("scenario-editor");cg.append(control("시험 방식","edit-congestionMode",cfg.congestionMode,"select",{actual:"실제 큐",environment:"환경 효과 주입"}));cg.append(node("p",{id:"scenarioModeText",class:"quiet"}));
   cg.append(control("지역 갱신 간격 (s)","edit-congestionRefresh",cfg.congestionRefresh,"number",{min:1e-11}));
@@ -243,7 +239,6 @@ function openSettings(cfg,resetDefaults=false){
   move(["slsInterval","slsMissCount","controlRefresh","controlTimeout","controlHeaderBytes","controlRecordBytes","controlMtu","controlReassemblyTimeout","controlResyncInterval","csibPeriod","csibMonitorInterval","csibMessageBytes"],pg);
   move(["reserveDelay","repairDelay","spfDelay","floodHopDelay","failureKnowledge","failureScopeHops","csibComputeDelay","csibReportProcDelay","csibHopProcDelay"],mg);
   byId("edit-floodModel").closest("label").dataset.mcsr="1";
-  move(["islMode","islScheduleFile"],lf);lf.append(scheduleLabel);
   ag.append(models,recording);
   container.insertBefore(node("p",{id:"settingsModelStatus",class:"model-status",role:"status",hidden:true}),basic);
   for(const key of ["algorithm","processingMode","controlMode","jitterModel","csibEnabled","failureKnowledge","queueCapacity"])byId("edit-"+key).addEventListener("change",updateMcsrControls);
@@ -323,9 +318,9 @@ byId("settingsForm").onsubmit=async event=>{
     for(const key of Object.keys(cfg.capabilities.booleans)){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.checked;}
     if(value("edit-controlMode")==="time")changes.csibEnabled=false;
     for(const key of Object.keys(cfg.capabilities.choices)){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.value;}
-    for(const key of ["congestionMode","failureSchedule","failureKnowledge","congestionZones","routeRecording","failureReplay"]){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.value;}
+    for(const key of ["congestionMode","failureSchedule","failureKnowledge","congestionZones","routeRecording"]){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=input.value;}
     for(const key of ["randomFailures","randomStart","randomEnd","randomDuration","failureSeed","congestionRefresh","congestionBuffer","congestionPacketBytes"]){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=numeric("edit-"+key);}
-    for(const key of ["processingMode","controlMode","jitterModel","islMode","islScheduleFile"]){const e=byId("edit-"+key);if(e&&!e.disabled)changes[key]=e.value;}
+    for(const key of ["processingMode","controlMode","jitterModel"]){const e=byId("edit-"+key);if(e&&!e.disabled)changes[key]=e.value;}
     for(const key of ["controlRefresh","controlTimeout","controlHeaderBytes","controlRecordBytes","controlMtu","controlReassemblyTimeout","controlResyncInterval"]){const input=byId("edit-"+key);if(input&&!input.disabled)changes[key]=numeric("edit-"+key);}
     changes.packetTrace=byId("edit-packetTrace").checked;
     for(const key of Object.keys(changes))if(changes[key]===cfg[key])delete changes[key];
@@ -453,7 +448,6 @@ function drawScenarioOverlay(snapshot,time){
 if(location.protocol==="file:")byId("btnSettings").hidden=true;
 if(typeof resultMeta!=="undefined"&&resultMeta)showMetrics(resultMeta);
 
-function readEventCsv(text){const rows=text.replace(/^\uFEFF/,"").trim().split(/\r?\n/);if(rows.shift()!=="time,event,satA,satB")throw Error("CSV 열: time,event,satA,satB");return rows.map(row=>{const[t,event,a,b]=row.split(",");return{time:Number(t),event:({fail:"failure",down:"failure",up:"restore"})[event]||event,a:Number(a),b:Number(b)};});}
 function offered(s){if((s.metricVersion||0)>=3||!Number.isFinite(s.attempted))return s;return{...s,deliveryRate:s.attempted?100*s.received/s.attempted:0,dropped:s.dropped+(s.noUplink??s.attempted-s.sent)};}
 function showResearchMetrics(s){
   let detail=byId("researchMetrics");if(detail)detail.remove();if((s.metricVersion||0)<3)return;

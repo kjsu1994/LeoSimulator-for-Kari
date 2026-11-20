@@ -127,6 +127,10 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     assert.equal(await evaluate("fetch('/api/config?config=Dijkstra132PairFail').then(r=>r.json()).then(c=>c.stations[0].sendInterval)"),.02);
     await evaluate("(async()=>{openSettings(await fetch('/api/config?config=PaperS1Mcsr').then(r=>r.json()))})()");
     assert.equal(await evaluate("document.querySelectorAll('.sender-check').length"),100);
+    assert(await evaluate("!byId('settingsSavedSchedules') && !byId('edit-islMode') && !byId('edit-islScheduleFile') && !byId('edit-failureReplay') && !byId('settingsFields').querySelector('input[accept=\".csv\"]')"));
+    await evaluate("window.normalSettings=nativeUI.config;openSettings({...normalSettings,islMode:'scheduled',failureReplayEvents:[{}]})");
+    assert(await evaluate("byId('settingsSavedSchedules').textContent.includes('개폐 일정') && byId('settingsSavedSchedules').textContent.includes('장애 기록')"));
+    await evaluate("openSettings(normalSettings)");
     assert.equal(await evaluate("value('edit-algorithm')"),"mcsr-ls");
     await evaluate("byId('edit-numSatellites').closest('.field-with-help').querySelector('button').click()");
     assert(await evaluate("document.querySelector('.help-popover:popover-open').textContent.includes('전달률')"));

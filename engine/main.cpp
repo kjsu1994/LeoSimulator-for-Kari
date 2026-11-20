@@ -228,7 +228,10 @@ public:
 #endif
   J c;std::string out;int n,g;Tick now=0,limit;long long sequence=0,packetId=0,routeId=0,noUplink=0,maxQueue=0,replanned=0,reserved=0;
   unsigned long long trafficHash=14695981039346656037ull;
-  double gap=0;std::priority_queue<Event> events;
+  const int queueCapacity,controlPayloadBytes;
+  const bool packetTrace,packetJitter,assumedProcessing;
+  const double controlReassemblyTimeout,reportProcessingDelay,lsaProcessingDelay,controlProcessingDelay;
+  double gap=0;std::vector<Event> events;
   std::mt19937 trafficRng,failureRng;
   std::vector<std::unique_ptr<cOrbitA>> orbits;std::vector<cEci> sat;std::vector<Position> ground;
   std::vector<std::unordered_map<int,Link>> links;
@@ -301,7 +304,10 @@ public:
   }
   void schedule(double t,std::function<void()> fn,EventKind kind=EventKind::Other) {
     if(!std::isfinite(t)||t<seconds()-1e-10)throw std::runtime_error("Invalid event time");
-    Tick tick=ticks(t);if(tick<limit)events.push({tick,sequence++,std::move(fn),kind});
+    Tick tick=ticks(t);
+    if(tick>=limit)return;
+    events.push_back({tick,sequence++,std::move(fn),kind});
+    std::push_heap(events.begin(),events.end());
   }
   void record(J e) {
     if(control && e.value("event",std::string())=="knowledge-applied") {int node=e["node"];for(auto &event:recovery)if(seconds()<=event.until&&!std::isfinite(event.applied[node])&&control->matches(node,event.a,event.b,event.up,event.time))event.applied[node]=seconds();}
@@ -329,7 +335,7 @@ public:
     bool mc=c["algorithm"].get<std::string>().find("mcsr")==0;
     for(int u=0;u<n;u++)for(auto &[v,l]:links[u])if(v<n && l.nominal && (l.active || failures.count(mcsr::linkKey(u,v))) && !f.blocksLink(u,v)) {
       if(control&&viewer>=0){auto r=control->perceived(viewer,u,v);if(!r.up)continue;result.addDirected(u,v,{1000*(l.prop+((mc||c.value("congestionAware",false))?r.extra:0.)),r.A,r.J});continue;}
-      int cap=c.value("queueCapacity",500);if(cap==0)cap=c.value("routingQueueCapacity",100);
+      int cap=queueCapacity;if(cap==0)cap=c.value("routingQueueCapacity",100);
       double a=std::max(0.,1-double(l.queue.size())/cap);a=std::min(a,l.availability);
       double j=seconds()-l.jitterAt<=c.value("jitterWindow",30.)?l.jitter:0;
       if(c.value("jitterSource",std::string("arrival"))=="delayChange")j=std::abs(l.prop-l.previousProp);
@@ -458,7 +464,7 @@ public:
   }
 
   void tracePacket(const std::shared_ptr<Packet> &p,const std::string &event,const std::string &detail) {
-    if(c.value("packetTrace",false))trace<<seconds()<<','<<event<<','<<p->source<<','<<p->dest<<','<<detail<<','<<p->id<<','<<p->hops<<'\n';
+    if(packetTrace)trace<<seconds()<<','<<event<<','<<p->source<<','<<p->dest<<','<<detail<<','<<p->id<<','<<p->hops<<'\n';
   }
   bool inMeasurement(Tick time)const{return measuring&&time>=measurementStart&&time<measurementEnd;}
   FlowStats &flow(const std::shared_ptr<Packet> &p){return flows[{p->source,p->dest}];}
@@ -473,7 +479,7 @@ public:
     if(!l.active){drop(p,"link-down");return;}
     if(l.loss>0||l.extraJ>0){auto key=(static_cast<unsigned long long>(l.a)<<32)|unsigned(l.b);auto at=std::find_if(p->visits.begin(),p->visits.end(),[&](auto v){return v.first==key;});if(at==p->visits.end()){p->visits.push_back({key,1});p->pass=1;}else p->pass=++at->second;}
     l.transmitting=true;l.current=p;l.txStarted=now;auto generation=++l.generation;int a=l.a,b=l.b;
-    double delay=l.prop+l.extra;if(c.value("jitterModel",std::string("packet"))=="packet"&&l.extraJ>0)delay+=uniform(*p,l,0x4a495454u)*2*std::sqrt(3.)*l.extraJ;
+    double delay=l.prop+l.extra;if(packetJitter&&l.extraJ>0)delay+=uniform(*p,l,0x4a495454u)*2*std::sqrt(3.)*l.extraJ;
     bool lost=l.loss>0&&uniform(*p,l,0x4c4f5353u)<l.loss;
     Tick duration=std::max<Tick>(1,ticks((p->bytes+24)*8/l.rate));l.wireDuration=duration/TICKS;
     const auto kind=p->control?EventKind::Control:EventKind::Data;
@@ -499,10 +505,10 @@ public:
     while(!l.transmitting&&!l.queue.empty()){auto next=l.queue.front();l.queue.pop_front();if(!next->control)flow(next).queued--;start(l,next);}
   }
   void transmit(const std::shared_ptr<Packet> &p,int a,int b) {
-    p->enqueued=now;if(p->control&&control){control->hopAccepted++;control->count(p->control->kind,&ControlCounts::frameAttempts);if(c.value("packetTrace",false))record({{"event","control-frame"},{"from",a},{"to",b},{"kind",p->control->kind},{"nonce",p->control->nonce},{"fragment",p->fragment},{"bytes",p->bytes+24}});}
+    p->enqueued=now;if(p->control&&control){control->hopAccepted++;control->count(p->control->kind,&ControlCounts::frameAttempts);if(packetTrace)record({{"event","control-frame"},{"from",a},{"to",b},{"kind",p->control->kind},{"nonce",p->control->nonce},{"fragment",p->fragment},{"bytes",p->bytes+24}});}
     auto l=find(a,b);if(!l||!l->active){drop(p,"link-down");return;}
     if(!l->transmitting&&l->queue.empty()){start(*l,p);return;}
-    int cap=c.value("queueCapacity",500);
+    int cap=queueCapacity;
     if(cap && l->queue.size()>=size_t(cap)){drop(p,"queue-overflow");return;}
     l->queue.push_back(p);if(!p->control)flow(p).queued++;maxQueue=std::max(maxQueue,(long long)l->queue.size());
   }
@@ -572,10 +578,10 @@ public:
     if(p->control){
       control->arrived++;control->count(p->control->kind,&ControlCounts::frameArrivals);auto assembly=p->assembly;
       if(assembly->failed||assembly->done)return;
-      if(!assembly->started&&assembly->parts.size()>1){assembly->started=true;auto weak=assembly;auto kind=p->control->kind;
-        schedule(seconds()+c.value("controlReassemblyTimeout",3.),[this,weak,kind]{if(auto a=weak)if(!a->done&&!a->failed){a->failed=true;control->count(kind,&ControlCounts::messageHopDrops);control->count(kind,&ControlCounts::reassemblyTimeouts);}});}
-      if(!assembly->accept(p->fragment))return;if(c.value("packetTrace",false))record({{"event","control-message"},{"from",from},{"node",node},{"kind",p->control->kind},{"nonce",p->control->nonce},{"fragments",assembly->parts.size()}});control->count(p->control->kind,&ControlCounts::messageHopArrivals);double proc=0;
-      if(c.value("processingMode",std::string("neutral"))=="assumed")proc=c.value((p->control->kind=="report"||p->control->kind=="vote")?"csibReportProcDelay":p->control->kind=="lsa"?"floodHopDelay":"csibHopProcDelay",0.);
+      if(!assembly->started&&assembly->fragments>1){assembly->started=true;auto weak=assembly;auto kind=p->control->kind;
+        schedule(seconds()+controlReassemblyTimeout,[this,weak,kind]{if(auto a=weak)if(!a->done&&!a->failed){a->failed=true;control->count(kind,&ControlCounts::messageHopDrops);control->count(kind,&ControlCounts::reassemblyTimeouts);}});}
+      if(!assembly->accept(p->fragment))return;if(packetTrace)record({{"event","control-message"},{"from",from},{"node",node},{"kind",p->control->kind},{"nonce",p->control->nonce},{"fragments",assembly->fragments}});control->count(p->control->kind,&ControlCounts::messageHopArrivals);double proc=0;
+      if(assumedProcessing)proc=(p->control->kind=="report"||p->control->kind=="vote")?reportProcessingDelay:p->control->kind=="lsa"?lsaProcessingDelay:controlProcessingDelay;
       if(proc>0)schedule(seconds()+proc,[this,p,node,from]{control->receive(node,from,p->control,p->ttl);});else control->receive(node,from,p->control,p->ttl);return;}
     if(node>=n) {
       auto &f=flow(p);f.received++;f.bytes+=p->bytes;double d=seconds()-p->created/TICKS;
@@ -694,7 +700,13 @@ public:
     schedule(seconds()+1,[this]{sample();},EventKind::Sample);
   }
 public:
-  Simulation(J cfg,const std::string &directory,bool profile=false):c(std::move(cfg)),out(directory),n(c["numSatellites"]),g(c["stations"].size()),limit(ticks(c["simTimeLimit"])),trafficRng(c.value("seed",23542)),failureRng(c.value("failureSeed",4242)),sat(n),ground(g),links(n+g),profiling(profile) {
+  Simulation(J cfg,const std::string &directory,bool profile=false):c(std::move(cfg)),out(directory),n(c["numSatellites"]),g(c["stations"].size()),limit(ticks(c["simTimeLimit"])),
+    queueCapacity(c.value("queueCapacity",500)),controlPayloadBytes(c.value("controlMtu",1500)-40),
+    packetTrace(c.value("packetTrace",false)),packetJitter(c.value("jitterModel",std::string("packet"))=="packet"),
+    assumedProcessing(c.value("processingMode",std::string("neutral"))=="assumed"),
+    controlReassemblyTimeout(c.value("controlReassemblyTimeout",3.)),reportProcessingDelay(c.value("csibReportProcDelay",0.)),
+    lsaProcessingDelay(c.value("floodHopDelay",0.)),controlProcessingDelay(c.value("csibHopProcDelay",0.)),
+    trafficRng(c.value("seed",23542)),failureRng(c.value("failureSeed",4242)),sat(n),ground(g),links(n+g),profiling(profile) {
     if(n<6||n>20000||g<1||g>5000||limit<=0||c["planes"].get<int>()<2||n%c["planes"].get<int>())throw std::runtime_error("Invalid engine dimensions");
     if(c.value("controlMode",std::string("packet"))=="time" && c.value("csibEnabled",false))
       throw std::runtime_error("CSIB requires packet control mode");
@@ -738,11 +750,11 @@ public:
       }
       control=std::make_unique<ControlPlane>(c,n,nominalIsls,srdOf,owners,[this]{return seconds();},[this](double t,auto f){schedule(t,f,EventKind::Control);},
         [this](int a,int b,ControlPlane::Msg message,int ttl){
-          int payload=c.value("controlMtu",1500)-40;if(payload<1)throw std::runtime_error("Invalid control MTU");
-          int count=1+(message->payloadBytes-1)/payload;auto assembly=std::make_shared<ControlAssembly>();assembly->parts.resize(count,false);control->count(message->kind,&ControlCounts::messageHopAttempts);
+          int payload=controlPayloadBytes;if(payload<1)throw std::runtime_error("Invalid control MTU");
+          int count=1+(message->payloadBytes-1)/payload;auto assembly=std::make_shared<ControlAssembly>(count);control->count(message->kind,&ControlCounts::messageHopAttempts);
           for(int part=0;part<count;part++){auto p=std::make_shared<Packet>();p->control=message;p->assembly=assembly;p->fragment=part;p->ttl=ttl;p->id=-(long long)message->nonce;p->bytes=std::min(payload,message->payloadBytes-part*payload)+16;p->pass=part;transmit(p,a,b);}
         },
-        [this](int u){std::vector<LinkReport> rows;for(auto &[v,l]:links[u])if(v<n&&l.nominal){int cap=c.value("queueCapacity",500);double A=cap?std::max(0.,1-double(l.queue.size())/cap):1.;rows.push_back({u,v,true,l.extra+(c.value("jitterModel",std::string("packet"))=="packet"?std::sqrt(3.)*l.extraJ:0.),std::min(A,l.availability),(c.value("jitterModel",std::string("packet"))=="cost"?std::hypot(c.value("jitterSource",std::string("arrival"))=="delayChange"?std::abs(l.prop-l.previousProp):l.jitter,l.extraJ):(c.value("jitterSource",std::string("arrival"))=="delayChange"?std::abs(l.prop-l.previousProp):l.jitter))*1000});}std::sort(rows.begin(),rows.end(),[](auto a,auto b){return a.b<b.b;});return rows;},
+        [this](int u){std::vector<LinkReport> rows;for(auto &[v,l]:links[u])if(v<n&&l.nominal){int cap=queueCapacity;double A=cap?std::max(0.,1-double(l.queue.size())/cap):1.;rows.push_back({u,v,true,l.extra+(c.value("jitterModel",std::string("packet"))=="packet"?std::sqrt(3.)*l.extraJ:0.),std::min(A,l.availability),(c.value("jitterModel",std::string("packet"))=="cost"?std::hypot(c.value("jitterSource",std::string("arrival"))=="delayChange"?std::abs(l.prop-l.previousProp):l.jitter,l.extraJ):(c.value("jitterSource",std::string("arrival"))=="delayChange"?std::abs(l.prop-l.previousProp):l.jitter))*1000});}std::sort(rows.begin(),rows.end(),[](auto a,auto b){return a.b<b.b;});return rows;},
         [this](J event){record(event);},[this,per](int k,int viewer){ComputeTimer measure(context,"ds-vote");mcsr::PlannerConfig pc;pc.planes=c["planes"];pc.satsPerPlane=per;pc.interPlaneSpacing=c["phasing"];pc.fixedK=initialK;pc.fixedL=initialL;auto planner=mcsr::Planner::create(pc,graph(viewer));return planner->router().voteDs(k);},[this](int a,int b){return links[a].at(b).prop;},[this]{return context.epoch;});
     }
     failureSchedule();
@@ -759,7 +771,8 @@ public:
     while(!events.empty()){
       const bool measureQueue=profiling&&processedEvents%PROFILE_INTERVAL==0;
       const auto begin=measureQueue?ProfileClock::now():ProfileClock::time_point{};
-      auto e=events.top();events.pop();
+      std::pop_heap(events.begin(),events.end());
+      auto e=std::move(events.back());events.pop_back();
       if(measureQueue){queuePopMilliseconds+=milliseconds(ProfileClock::now()-begin);++queuePopSamples;}
       now=e.time;context.now=seconds();
       if(!profiling){e.action();continue;}

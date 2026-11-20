@@ -11,9 +11,14 @@
 using J=nlohmann::json;
 #include "control.h"
 int main(){
-  ControlAssembly a;a.parts.resize(3,false);
+  ControlAssembly single(1);
+  assert(single.parts.empty()&&!single.accept(-1)&&!single.accept(1));
+  assert(single.accept(0)&&single.done&&!single.accept(0));
+  ControlAssembly droppedSingle(1);droppedSingle.failed=true;
+  assert(!droppedSingle.accept(0)&&!droppedSingle.done);
+  ControlAssembly a(3);
   assert(!a.accept(2));assert(!a.accept(0));assert(!a.accept(2));assert(a.received==2);assert(a.accept(1));assert(!a.accept(1));
-  ControlAssembly lost;lost.parts.resize(2,false);assert(!lost.accept(0));lost.failed=true;assert(!lost.accept(1));assert(!lost.done);
+  ControlAssembly lost(2);assert(!lost.accept(0));lost.failed=true;assert(!lost.accept(1));assert(!lost.done);
   using Hop=std::tuple<int,int,ControlPlane::Msg,int>;std::queue<Hop> hops;int sends=0;
   J cfg={{"algorithm","mcsr-ls"},{"csibEnabled",true}};
   ControlPlane plane(cfg,4,{{0,1},{1,2},{2,3}},{0,0,0,0},{3},[]{return 0.;},[](double,std::function<void()>){},

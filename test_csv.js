@@ -12,13 +12,6 @@ for (const bad of ["bad", h + "NaN,1,GS0,2,3,4,1,2,3,5,3-4", h + "1,1,GS0,2,3,4,
 assert.deepEqual(parseRoutesCsv(h), []);
 console.log(`CSV validation passed: ${rows.length} rows, all 11 original columns retained`);
 
-const vm=require("node:vm");
-const eventParser=fs.readFileSync(`${__dirname}/editor.js`,"utf8").match(/function readEventCsv\(text\)\{[^\n]+/)[0];
-const eventInput="\uFEFFtime,event,satA,satB\r\n0.1,down,0,1\r\n0.2,up,0,1\r\n";
-const events=vm.runInNewContext(eventParser+`;readEventCsv(${JSON.stringify(eventInput)})`);
-assert.equal(events.length,2);assert.equal(events[0].event,"failure");assert.equal(events[1].event,"restore");
-console.log("Scheduled-link CSV passed: BOM, CRLF and legacy event names");
-
 (async()=>{
   const {parseRoutesBlob,sameRoutes,findRouteById}=require('./csv.js');
   const count=120000,header=raw.split(/\r?\n/)[0];
