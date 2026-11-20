@@ -13,7 +13,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual({p.name for p in (package / "data").iterdir()}, {"earth.png"})
             for file in ("LICENSE", "THIRD_PARTY_NOTICES.txt", "licenses/LGPL-3.0.txt",
                          "licenses/Microsoft-WebView2-1.0.3856.49.txt", "engine/main.cpp",
-                         "engine/algorithms.h", "engine/vendor/json.hpp", "server.py", "sim-ui.spec",
+                         "engine/algorithms.h", "engine/vendor/json.hpp", "server.py", "sim-ui.spec", "sim-ui.ico",
                          "manual/index.html",
                          "manual/assets/overview.png"):
                 self.assertTrue((package / file).is_file(), file)

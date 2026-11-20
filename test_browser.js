@@ -12,12 +12,16 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
   const httpRoot=path.join(profile,"http");fs.mkdirSync(path.join(httpRoot,"data"),{recursive:true});
   const brandAsset="manual/assets/Kari_logo.png";
   fs.mkdirSync(path.join(httpRoot,"manual/assets"),{recursive:true});
-  for(const file of ["index.html","app.js","editor.js","orbit.js","csv.js","bundle.js","style.css","data/earth.png",brandAsset])fs.copyFileSync(path.join(__dirname,file),path.join(httpRoot,file));
+  for(const file of ["index.html","app.js","editor.js","orbit.js","csv.js","bundle.js","style.css","sim-ui.ico","data/earth.png",brandAsset])fs.copyFileSync(path.join(__dirname,file),path.join(httpRoot,file));
   fs.cpSync(path.join(__dirname,"settings"),path.join(httpRoot,"settings"),{recursive:true});
   const referenceManifest=JSON.parse(fs.readFileSync(path.join(__dirname,"testdata/bundle/manifest.json"),"utf8")),referenceFiles={};
   for(const file of Object.keys(referenceManifest.files))referenceFiles[file]=fs.readFileSync(path.join(__dirname,"testdata/bundle",file),"utf8");
   const referenceResult={ok:true,runId:referenceManifest.runId,bundle:{manifest:referenceManifest,files:referenceFiles}};
   const referenceFolder=path.join(httpRoot,"data/runs",referenceManifest.runId);fs.mkdirSync(referenceFolder,{recursive:true});
+  for (const [name,text] of Object.entries(referenceFiles)) {
+    const file=path.join(referenceFolder,name);fs.mkdirSync(path.dirname(file),{recursive:true});fs.writeFileSync(file,text);
+  }
+  fs.writeFileSync(path.join(referenceFolder,"manifest.json"),JSON.stringify(referenceManifest));
   fs.writeFileSync(path.join(referenceFolder,"result.json"),JSON.stringify(referenceResult));fs.writeFileSync(path.join(httpRoot,"data/latest.json"),JSON.stringify({runId:referenceManifest.runId}));fs.writeFileSync(path.join(httpRoot,"data/latest_result.js"),"window.SIM_RESULT="+JSON.stringify(referenceResult)+";");
   const server = spawn("python", ["-c", `import server,http.server,sys,os;server.BASE_DIR=sys.argv[1];server.LEO_DIR=os.path.join(server.BASE_DIR,'settings');server.INI_PATH=os.path.join(server.LEO_DIR,'simulations/Network/omnetpp.ini');http.server.ThreadingHTTPServer(('127.0.0.1',${port}),server.SimHandler).serve_forever()`,stored?__dirname:httpRoot], {cwd: __dirname, windowsHide:true, stdio:"ignore"});
   const appUrl = "http://127.0.0.1:"+port+"/";
@@ -58,26 +62,24 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     await retry(async()=> assert(await evaluate("typeof resultMeta !== 'undefined' && resultMeta?.replay === true"))).catch(async err=>{console.error('Startup state:',await evaluate("({status:document.getElementById('runStatus')?.textContent,meta:typeof resultMeta,loaded:!!window.SIM_RESULT})"),errors);throw err;});
     await retry(async()=>assert(await evaluate("document.readyState==='complete' && typeof openSettings==='function'"))).catch(async error=>{console.error("Script loading:",await evaluate("({url:location.href,ready:document.readyState,scripts:[...document.scripts].map(s=>s.src),resources:performance.getEntriesByType('resource').map(r=>({url:r.name,bytes:r.transferSize}))})"),errors,loadFailures);throw error;});
     assert.equal(await evaluate("document.getElementById('scenarioDetails').open"),false);
-    assert.equal(await evaluate("document.getElementById('iniTable').checkVisibility()"),false);
+    assert(await evaluate("!byId('iniTable') && !byId('cfgOwnIni')"));
     assert.equal(await evaluate("document.getElementById('scenarioConstellation').textContent"),"132기 · 12개 궤도면");
     assert.equal(await evaluate("document.getElementById('scenarioDuration').textContent"),"600초");
     assert.equal(await evaluate("document.getElementById('scenarioRouting').textContent"),"지연 최소");
     assert.equal(await evaluate("document.getElementById('scenarioTraffic').textContent"),"2s · 1000B");
-    await evaluate("document.querySelector('#scenarioDetails summary').click();iniFilter.value='routing.metric';iniFilter.oninput()");
+    await evaluate("document.querySelector('#scenarioDetails summary').click()");
     assert.equal(await evaluate("document.getElementById('scenarioDetails').open"),true);
-    assert.equal(await evaluate("document.querySelector('#iniTable tbody').children.length"),1);
-    await evaluate("document.querySelector('#scenarioDetails summary').click();iniFilter.value='';iniFilter.oninput()");
+    assert(await evaluate("byId('btnOpenIni').checkVisibility() && byId('btnRefreshIni').checkVisibility()"));
+    assert(await evaluate("byId('srcFilter').getBoundingClientRect().top===byId('dstFilter').getBoundingClientRect().top"));
+    await evaluate("document.querySelector('#scenarioDetails summary').click()");
     assert(await evaluate("document.querySelector('.brand-logo').naturalWidth>0 && getComputedStyle(document.querySelector('.brand-logo')).filter==='brightness(0) invert(1)'"));
-    console.log("Scenario UI passed: concise conditions, details collapsed by default, disclosure and search work");
+    console.log("Scenario UI passed: concise conditions, details collapsed by default, file actions available");
     assert.equal(await evaluate("document.getElementById('cfgName').disabled"),false);
     assert(await evaluate("document.getElementById('runnerActions').checkVisibility() && !document.getElementById('btnOpenIni').checkVisibility()"));
     assert.equal(await evaluate("cfgNameSel.selectedOptions[0].textContent"),"기본 통신");
     assert.equal(await evaluate("scenarioName('PaperS1MyCustom')"),"PaperS1MyCustom");
     assert.equal(await evaluate("byId('algorithmChoice').value"),"dijkstra-delay");
     assert(await evaluate("cfgNameSel.options.length<12"));
-    await evaluate("iniFilter.value='송신 간격';iniFilter.oninput()");
-    assert(await evaluate("document.querySelector('#iniTable tbody').children.length>0 && document.querySelector('#iniTable tbody').textContent.includes('sendInterval')"));
-    await evaluate("iniFilter.value='';iniFilter.oninput()");
     await evaluate("simTime=300.5;render()");
     assert.equal(await evaluate("stateAt(simTime).t"),300.5);
     assert.equal(await evaluate("document.getElementById('kpiSat').textContent"),"132 / 264");
@@ -109,7 +111,7 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     await evaluate("(async()=>{window.algorithmFetch=window.fetch;window.fetch=async()=>new Response(JSON.stringify({error:'save rejected'}),{status:400});byId('algorithmChoice').value='mcsr-hr';await byId('algorithmChoice').onchange({target:byId('algorithmChoice')});window.fetch=window.algorithmFetch;})()");
     assert(await evaluate("byId('algorithmChoice').value==='mcsr-ts' && !byId('algorithmChoice').disabled && runStatus.textContent==='save rejected'"));
     await evaluate("(async()=>{byId('algorithmChoice').value='dijkstra-delay';await byId('algorithmChoice').onchange({target:byId('algorithmChoice')});})()");
-    console.log('Simple workflow passed: curated conditions, additional configurations, separate algorithm selection, persisted INI, unchanged traffic/result, save-error rollback and Korean INI search');
+    console.log('Simple workflow passed: curated conditions, additional configurations, separate algorithm selection, persisted INI, unchanged traffic/result, save-error rollback');
     await evaluate("cfgNameSel.value='Dijkstra132PairFail';cfgNameSel.dispatchEvent(new Event('change'));void 0");
     await retry(async()=>assert(await evaluate("byId('scenarioMeaning').textContent.includes('60·120·180초') && byId('scenarioMeaning').textContent.includes('30초간')")));
     await evaluate("cfgNameSel.value='Dijkstra132RandomFail';cfgNameSel.dispatchEvent(new Event('change'));void 0");
@@ -180,7 +182,21 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     const nativeResult=JSON.parse(fs.readFileSync(path.join(nativeFolder,'browser-result.json'),'utf8'));
     await evaluate(`openResultBundle(${JSON.stringify(nativeResult.bundle)})`);
     assert(await evaluate("!byId('nativeMetrics').hidden && byId('metricValues').children.length===8 && resultMeta.summary.received>0"));
+    assert(await evaluate(`(()=>{
+      const panel=byId('nativeMetrics'),grid=byId('metricValues');
+      const check=(width,columns)=>{
+        panel.style.width=width+'px';
+        return getComputedStyle(grid).gridTemplateColumns.split(' ').length===columns && grid.scrollWidth===grid.clientWidth;
+      };
+      const fits=check(410,4)&&check(300,2);
+      panel.style.width='';
+      return fits;
+    })()`));
 
+    assert(await evaluate("!byId('metricDetails').open && byId('btnMetricDetails').checkVisibility()"));
+    await evaluate("byId('btnMetricDetails').click()");
+    assert(await evaluate("byId('metricDetails').open && byId('metricDetailContent').contains(byId('researchMetrics'))"));
+    await evaluate("byId('metricDetails').close()");
     assert(await evaluate("resultMeta.summary.metricVersion===4 && !!byId('researchMetrics')"));
     await evaluate("byId('metricSeries').value='controlBytes';drawMetrics()");
     const nativeJson=JSON.stringify(nativeResult);
@@ -242,7 +258,7 @@ async function retry(fn,attempts=300) { for (let i=0;i<attempts;i++) { try { ret
     const offline = path.join(profile, "offline");
     fs.mkdirSync(path.join(offline, "data"), {recursive:true});
     fs.mkdirSync(path.join(offline,"manual/assets"),{recursive:true});
-    for (const file of ["index.html", "app.js","editor.js", "orbit.js", "csv.js", "bundle.js", "style.css", "data/latest_result.js", "data/earth.png",brandAsset])
+    for (const file of ["index.html", "app.js","editor.js", "orbit.js", "csv.js", "bundle.js", "style.css", "sim-ui.ico", "data/latest_result.js", "data/earth.png",brandAsset])
       fs.copyFileSync(path.join(httpRoot,file),path.join(offline,file));
     await send("Page.navigate", {url: require("node:url").pathToFileURL(path.join(offline, "index.html")).href});
     await retry(async()=> assert(await evaluate("location.protocol === 'file:' && typeof resultMeta !== 'undefined' && resultMeta?.replay === true")));

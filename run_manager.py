@@ -22,6 +22,14 @@ LOCK=threading.Lock()
 CONFIG_LOCK=threading.RLock()
 NO_WIN=getattr(subprocess,'CREATE_NO_WINDOW',0)
 
+from contextlib import contextmanager
+from windows_runtime import launch_engine
+from comparison import result_directory
+import logging
+
+logger = logging.getLogger('leo')
+
+
 GIB = 1024**3
 CRITICAL_MEMORY = GIB//2
 CRITICAL_SECONDS = 5
@@ -60,13 +68,13 @@ def cpu_seconds(process):
     ok = ctypes.windll.kernel32.GetProcessTimes(ctypes.c_void_p(int(process._handle)), *(ctypes.byref(t) for t in times))
     return (times[2].value + times[3].value) / 1e7 if ok else None
 
-def engine_memory_estimates(base, common, algorithms):
-    from comparison import fingerprint
+def engine_memory_estimates(base, common, algorithms, *, results=None):
+    from comparison import completed_manifest, fingerprint
     signature = fingerprint(common)
     estimates = {}
-    for manifest in (Path(base)/'data/runs').glob('*/manifest.json'):
+    for manifest in (result_directory(base,results)/'runs').glob('*/manifest.json'):
         try:
-            data = json.loads(manifest.read_text(encoding='utf-8'))
+            data = completed_manifest(manifest.parent)
             algorithm = (data.get('algorithmSettings') or {}).get('algorithm')
             if data.get('environmentHash') != signature or algorithm not in algorithms:
                 continue
@@ -183,8 +191,8 @@ def prepare(base,cfg,cancel=None,*,low_priority=False,watch_host=False):
     cancel=cancel or threading.Event()
     with tempfile.TemporaryDirectory(prefix='leo-physical-') as tmp:
         folder=Path(tmp);file=folder/'input.json';file.write_text(json.dumps(cfg,ensure_ascii=False,allow_nan=False),encoding='utf-8')
-        with (folder/'prepare.log').open('wb') as log:
-            process=subprocess.Popen([str(Path(base)/'engine/engine.exe'),str(file),str(folder),'--prepare'],stdout=log,stderr=subprocess.STDOUT,creationflags=LOW_PRIORITY if low_priority else NO_WIN)
+        with (folder/'prepare.log').open('wb') as log, launch_engine(
+                [str(Path(base)/'engine/engine.exe'),str(file),str(folder),'--prepare'],log,LOW_PRIORITY if low_priority else NO_WIN) as process:
             low_since=None
             try:
                 while process.poll() is None:
@@ -210,13 +218,20 @@ def prepare(base,cfg,cancel=None,*,low_priority=False,watch_host=False):
     cfg['physicalEventsHash']=hashlib.sha256(json.dumps(events,sort_keys=True,separators=(',',':')).encode()).hexdigest()
     return cfg
 
-def publish_latest(base, result):
+def publish_latest(base, result, *, offline_copy=True, results=None):
     """Publish the finished run to HTTP and offline readers."""
-    data=Path(base)/'data'
+    data=result_directory(base,results)
     pointer=data/'latest.json'
     offline=data/'latest_result.js'
     pointer_tmp=pointer.with_suffix('.tmp')
     offline_tmp=offline.with_suffix('.tmp')
+    if not offline_copy:
+        try:
+            pointer_tmp.write_text(json.dumps({'runId':result['runId']}),encoding='utf8')
+            os.replace(pointer_tmp,pointer)
+        finally:
+            pointer_tmp.unlink(missing_ok=True)
+        return
     previous=pointer.read_bytes() if pointer.exists() else None
     try:
         pointer_tmp.write_text(json.dumps({'runId':result['runId']}),encoding='utf8')
@@ -235,8 +250,9 @@ def publish_latest(base, result):
         pointer_tmp.unlink(missing_ok=True)
         offline_tmp.unlink(missing_ok=True)
 
-def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,variables=None,frozen=None,*,publish=True,execution=None):
+def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,variables=None,frozen=None,*,publish=True,execution=None,assets=None,results=None):
     from result_bundle import make_native_bundle,write_bundle
+    from comparison import commit_result
     prepared_at=time.monotonic()
     run_id=run_id or new_id();base=Path(base);cancel=cancel or threading.Event()
     if frozen is None:
@@ -246,15 +262,16 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
     else:cfg,inputs=frozen
     from native_engine import validate_control_mode
     validate_control_mode(cfg)
-    cfg=prepare(base,cfg,cancel)
-    folder=base/'data/runs'/run_id;folder.mkdir(parents=True,exist_ok=False)
+    asset_root=Path(assets) if assets is not None else base
+    cfg=prepare(asset_root,cfg,cancel)
+    folder=result_directory(base,results)/'runs'/run_id;folder.mkdir(parents=True,exist_ok=False)
     (folder/'engine-input.json').write_text(json.dumps(cfg,ensure_ascii=False,allow_nan=False),encoding='utf-8')
     start=time.monotonic();peak=commit_peak=0
-    executable=base/'engine/engine.exe'
+    executable=asset_root/'engine/engine.exe'
     if not executable.is_file():raise ValueError('Local engine is missing')
-    with (folder/'run.log').open('wb') as log:
-        process=subprocess.Popen([str(executable),str(folder/'engine-input.json'),str(folder)],stdout=log,stderr=subprocess.STDOUT,
-                                 creationflags=LOW_PRIORITY if execution and execution['mode']=='auto' else NO_WIN)
+    with (folder/'run.log').open('wb') as log, launch_engine(
+            [str(executable),str(folder/'engine-input.json'),str(folder)],log,
+            LOW_PRIORITY if execution and execution['mode']=='auto' else NO_WIN) as process:
         try:
             while process.poll() is None:
                 if cancel.wait(.1):raise InterruptedError('실행을 중지했습니다.')
@@ -266,17 +283,18 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
                 process.terminate()
                 try:process.wait(timeout=1)
                 except subprocess.TimeoutExpired:process.kill();process.wait(timeout=1)
+        engine_ended=time.monotonic()
+        working, commit = process_memory(process)
+        peak=max(peak,working);commit_peak=max(commit_peak,commit)
+        cpu=cpu_seconds(process)
     if cancel.is_set():raise InterruptedError('실행을 중지했습니다.')
     if process.returncode:raise RuntimeError((folder/'run.log').read_text(encoding='utf-8',errors='replace')[-4000:])
-    engine_ended=time.monotonic()
-    working, commit = process_memory(process)
-    peak=max(peak,working);commit_peak=max(commit_peak,commit)
     if max(peak,commit_peak)>4*GIB:raise RuntimeError('엔진 메모리가 4GiB 제한을 초과했습니다.')
     from research import evidence
     summary=json.loads((folder/'summary.json').read_text())
     if summary.get('modelVersion')!=cfg['modelVersion']:
         raise ValueError('Engine model version differs from normalized input')
-    summary['validation']=evidence(base)
+    summary['validation']=evidence(asset_root)
     summary['elapsedSeconds']=time.monotonic()-start
     summary['peakMemoryBytes']=peak
     host={'mode':'sequential','workers':1,'sharedPreparationSeconds':0}
@@ -284,29 +302,32 @@ def execute(base,settings,ini,config_name,read_config,run_id=None,cancel=None,va
         host.update(mode=execution['mode'],workers=2 if execution['overlap'].is_set() else 1,
                     sharedPreparationSeconds=execution['preparationSeconds'])
     host.update(preparationSeconds=start-prepared_at,engineSeconds=engine_ended-start,
-                cpuSeconds=cpu_seconds(process),peakCommitBytes=commit_peak)
+                cpuSeconds=cpu,peakCommitBytes=commit_peak)
     summary['hostExecution']=host
     (folder/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,allow_nan=False,indent=2),encoding='utf-8')
-    profile=json.loads((base/'replay-model.json').read_text(encoding='utf-8'))
+    profile=json.loads((asset_root/'replay-model.json').read_text(encoding='utf-8'))
     bundle,payload=make_native_bundle(inputs,folder,config_name,profile['modelHash'],cfg,run_id,entry=Path(ini).relative_to(settings).as_posix())
-    build=base/'engine/build-info.json'
+    build=asset_root/'engine/build-info.json'
     if build.exists():
         info=json.loads(build.read_text());
         if info['sha256']!=cfg['commonKernelHash'] or info['version']!=summary.get('version'):raise ValueError('Engine build metadata changed')
         bundle['manifest']['build']=info
     bundle['manifest']['engine']['sha256']=cfg['commonKernelHash']
+    bundle['manifest']['completionRequired']=True
     write_bundle(folder,bundle,payload)
     result={'ok':True,'runId':run_id,'bundle':bundle}
     (folder/'result.json').write_text(json.dumps(result,ensure_ascii=False,allow_nan=False),encoding='utf-8')
     (folder/'performance.json').write_text(json.dumps({**host,'peakMemoryBytes':peak,
                                                        'saveSeconds':time.monotonic()-engine_ended},indent=2),encoding='utf-8')
-    if publish:
-        with LOCK:
-            if cancel.is_set():raise InterruptedError('실행을 중지했습니다.')
-            publish_latest(base,result)
+    with LOCK:
+        if cancel.is_set():raise InterruptedError('실행을 중지했습니다.')
+        commit_result(folder)
+        if publish:
+            if results is None and assets is None:publish_latest(base,result)
+            else:publish_latest(base,result,offline_copy=False,results=results)
     return result
 
-def start(base,settings,ini,name,read_config,variables=None,algorithms=None,research=None):
+def start(base,settings,ini,name,read_config,variables=None,algorithms=None,research=None,*,assets=None,results=None):
     from native_engine import ALGORITHMS, validate_control_mode
     # Validate before accepting the job; a rejected request creates no run folder.
     with CONFIG_LOCK:
@@ -330,10 +351,10 @@ def start(base,settings,ini,name,read_config,variables=None,algorithms=None,rese
     seeds=[seed_start+i for i in range(repetitions)]
     with LOCK:
         if any(j['status'] in ('queued','running','stopping') for j in JOBS.values()):raise ValueError('다른 계산이 실행 중입니다.')
-        run_id=new_id();event=threading.Event();job={'runId':run_id,'status':'queued','cancel':event,'base':str(base),'executionMode':mode,'activeRuns':[]};JOBS[run_id]=job
+        run_id=new_id();event=threading.Event();job={'runId':run_id,'status':'queued','cancel':event,'base':str(base),'results':str(results) if results is not None else None,'executionMode':mode,'activeRuns':[]};JOBS[run_id]=job
     def work():
         job['status']='running';job['phase']='preparing';job['started']=time.monotonic();job['completedRuns']=[]
-        folder=Path(base)/'data/experiments'/run_id
+        folder=result_directory(base,results)/'experiments'/run_id
         selected=algorithms or [cfg['algorithm']];job['totalRuns']=len(selected)*len(seeds)
         manifest={'schema':2,'experimentId':run_id,'configName':name,'seeds':seeds,'algorithms':selected,'runs':job['completedRuns'],'status':'running'}
         records=[]
@@ -351,7 +372,7 @@ def start(base,settings,ini,name,read_config,variables=None,algorithms=None,rese
                 job['phase']='preparing';job['resourceLimited']=False;job.pop('resourceWait',None)
                 job.pop('currentRunId',None)
                 preparation_started=time.monotonic()
-                common=prepare(base,seed_config,event,low_priority=mode=='auto',watch_host=algorithms is not None);common['experimentId']=run_id
+                common=prepare(assets or base,seed_config,event,low_priority=mode=='auto',watch_host=algorithms is not None);common['experimentId']=run_id
                 preparation_seconds=time.monotonic()-preparation_started
                 prefix='' if index==0 else f'seed-{seed}-'
                 for filename,data in [('common.json',common),('physical-events.json',common['physicalEvents']),('common-srd.json',common.get('commonSrd'))]:
@@ -359,7 +380,7 @@ def start(base,settings,ini,name,read_config,variables=None,algorithms=None,rese
                 if index==0:manifest.update(physicalEventsHash=common['physicalEventsHash'],commonSrdHash=common.get('commonSrdHash'))
                 job['phase']='running';save_manifest()
                 order=selected[index%len(selected):]+selected[:index%len(selected)]
-                estimates = engine_memory_estimates(base, common, order) if mode=='auto' else {}
+                estimates = engine_memory_estimates(base, common, order, **({'results':results} if results is not None else {})) if mode=='auto' else {}
                 planned = [(algorithm,new_id() if algorithms is not None else run_id) for algorithm in order]
                 finished = {}
                 last_run_id = planned[-1][1]
@@ -368,8 +389,8 @@ def start(base,settings,ini,name,read_config,variables=None,algorithms=None,rese
                     child['routingType']='Sat_Net_McsrRouting' if algorithm.startswith('mcsr-') else 'Sat_Net_DijkstraRouting'
                     child['metric']='hop' if algorithm=='dijkstra-hop' else 'delay'
                     result=execute(base,settings,ini,name,read_config,child_id,event,variables,(child,inputs),
-                                   publish=False,execution={'mode':mode,'overlap':overlap,'preparationSeconds':preparation_seconds})
-                    summary=json.loads((Path(base)/'data/runs'/child_id/'summary.json').read_text(encoding='utf-8'))
+                                   publish=False,execution={'mode':mode,'overlap':overlap,'preparationSeconds':preparation_seconds},**({'assets':assets} if assets is not None else {}),**({'results':results} if results is not None else {}))
+                    summary=json.loads((result_directory(base,results)/'runs'/child_id/'summary.json').read_text(encoding='utf-8'))
                     return child, summary, result if child_id==last_run_id else None
 
                 prior_runs=list(manifest['runs'])
@@ -459,16 +480,17 @@ def start(base,settings,ini,name,read_config,variables=None,algorithms=None,rese
             with LOCK:
                 if event.is_set():raise InterruptedError('실행을 중지했습니다.')
                 manifest['status']='completed';save_manifest()
-                publish_latest(base,result)
+                if results is None and assets is None:publish_latest(base,result)
+                else:publish_latest(base,result,offline_copy=False,results=results)
                 job['result']=manifest if algorithms is not None else result;job['status']='completed'
-        except InterruptedError as e:
-            job.update(status='cancelled',error=str(e));manifest.update(status='cancelled',error=str(e))
-            try:save_manifest()
-            except OSError:pass
-        except Exception as e:
-            job.update(status='failed',error=str(e));manifest.update(status='failed',error=str(e))
-            try:save_manifest()
-            except OSError:pass
+        except Exception as error:
+            status='cancelled' if isinstance(error,InterruptedError) else 'failed'
+            if status=='failed':logger.exception('Run %s failed',run_id)
+            manifest.update(status=status,error=str(error))
+            with LOCK:
+                try:save_manifest()
+                except OSError:logger.warning('Could not save run status %s',run_id,exc_info=True)
+                job.update(status=status,error=str(error))
     thread=threading.Thread(target=work,daemon=True)
     with LOCK:
         job['thread']=thread;thread.start()
@@ -478,15 +500,15 @@ def state(run_id):
     with LOCK:
         job=JOBS.get(run_id)
         if not job:raise ValueError('알 수 없는 실행입니다.')
-        out={k:v for k,v in job.items() if k not in ('cancel','thread','started','base')}
+        out={k:v for k,v in job.items() if k not in ('cancel','thread','started','base','results')}
         started=job.get('started')
-        base=job['base']
+        base=job['base'];results=job.get('results')
     if started is not None:out['elapsedSeconds']=time.monotonic()-started
     active=[]
     for row in out['activeRuns']:
         row=dict(row)
         try:
-            row['progress']=json.loads((Path(base)/'data/runs'/row['runId']/'progress.json').read_text())
+            row['progress']=json.loads((result_directory(base,results)/'runs'/row['runId']/'progress.json').read_text())
         except (OSError,ValueError):pass
         active.append(row)
     out['activeRuns']=active
@@ -500,8 +522,18 @@ def cancel(run_id):
         if job['status'] in ('queued','running'):job['status']='stopping';job['cancel'].set()
     return {'ok':True,'runId':run_id,'status':job['status']}
 
+@contextmanager
+def idle_workspace():
+    with CONFIG_LOCK:
+        with LOCK:
+            if any(job['status'] in ('queued','running','stopping') for job in JOBS.values()):
+                raise RuntimeError('실행을 마친 뒤 결과 저장 폴더를 변경하세요.')
+        yield
+
+
 def shutdown():
-    with LOCK:jobs=list(JOBS.values())
+    with CONFIG_LOCK, LOCK:jobs=list(JOBS.values())
     for job in jobs:job['cancel'].set()
+    deadline=time.monotonic()+3
     for job in jobs:
-        if 'thread' in job:job['thread'].join(timeout=3)
+        if 'thread' in job:job['thread'].join(timeout=max(0,deadline-time.monotonic()))

@@ -14,7 +14,7 @@ import json
 ROOT = Path(__file__).resolve().parent
 SOURCE_FILES = sorted({p.name for pattern in ("*.py", "*.js", "*.html", "*.css", "*.bat") for p in ROOT.glob(pattern)} | {
     "README.md", "REPLAY_NOTES.md", "replay-model.json", "LICENSE",
-    "THIRD_PARTY_NOTICES.txt", "requirements-build.txt", "sim-ui.spec",
+    "THIRD_PARTY_NOTICES.txt", "requirements-build.txt", "sim-ui.spec", "sim-ui.ico",
 })
 
 

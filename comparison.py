@@ -13,38 +13,75 @@ def environment(config):
 
 def fingerprint(config):return hashlib.sha256(json.dumps(environment(config),sort_keys=True,ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
 
-def folder(base,run_id):
-    if not re.fullmatch(r'[A-Za-z0-9-]{8,80}',run_id):raise ValueError('Invalid run ID')
-    return Path(base)/'data/runs'/run_id
+def result_directory(base, results=None):
+    return Path(results) if results is not None else Path(base)/"data"
 
-def runs(base):
+
+def folder(base,run_id,*,results=None):
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,80}',run_id):raise ValueError('Invalid run ID')
+    return result_directory(base,results)/'runs'/run_id
+
+def completed_manifest(directory):
+    """New bundles commit last. Legacy bundles must contain their declared files."""
+    raw=(directory/'manifest.json').read_bytes()
+    manifest=json.loads(raw)
+    if manifest.get('runId')!=directory.name or not re.fullmatch(r'[A-Za-z0-9-]{8,80}',directory.name):
+        raise ValueError('Invalid result ID')
+    files=manifest.get('files')
+    if not isinstance(files,dict) or not files:
+        raise ValueError('Missing result files')
+    if manifest.get('completionRequired'):
+        marker=json.loads((directory/'completed.json').read_bytes())
+        if marker!={'runId':directory.name,'manifestSHA256':hashlib.sha256(raw).hexdigest()}:
+            raise ValueError('Incomplete run')
+        for name in ('result.json','performance.json'):
+            if not (directory/name).is_file():raise ValueError('Incomplete run')
+    for name in files:
+        relative=Path(name)
+        if relative.anchor or '..' in relative.parts or not (directory/relative).is_file():
+            raise ValueError('Missing or invalid result file')
+    return manifest
+
+
+def commit_result(directory):
+    marker=directory/'completed.json'
+    temporary=marker.with_suffix('.tmp')
+    try:
+        temporary.write_text(json.dumps({'runId':directory.name,
+            'manifestSHA256':hashlib.sha256((directory/'manifest.json').read_bytes()).hexdigest()}),encoding='utf-8')
+        temporary.replace(marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def runs(base,*,results=None):
     out=[]
-    for p in sorted((Path(base)/'data/runs').glob('*/manifest.json'),key=lambda p:p.stat().st_mtime,reverse=True):
+    for p in sorted((result_directory(base,results)/'runs').glob('*/manifest.json'),key=lambda p:p.stat().st_mtime,reverse=True):
         try:
-            m=json.loads(p.read_text(encoding='utf-8'));s=p.parent/'summary.json'
+            m=completed_manifest(p.parent);s=p.parent/'summary.json'
             if m.get('format') in ('leo-native-replay-v2','leo-native-replay-v3','leo-native-replay-v4') and s.is_file():out.append({'runId':m['runId'],'configName':m['configName'],'createdAt':m['createdAt'],'summary':json.loads(s.read_text())})
         except (OSError,ValueError,KeyError):continue
     return out
 
-def run_metadata(base):
+def run_metadata(base,*,results=None):
     formats = {'florasat-csv-ini-v1', 'leo-native-replay-v2', 'leo-native-replay-v3', 'leo-native-replay-v4'}
-    results = []
-    for path in (Path(base)/'data/runs').glob('*/manifest.json'):
+    rows = []
+    for path in (result_directory(base,results)/'runs').glob('*/manifest.json'):
         try:
-            manifest = json.loads(path.read_text(encoding='utf-8'))
+            manifest = completed_manifest(path.parent)
             run_id = manifest['runId']
-            if manifest['format'] not in formats or folder(base, run_id) != path.parent:
+            if manifest['format'] not in formats or folder(base, run_id,results=results) != path.parent:
                 continue
             algorithm = (manifest.get('algorithmSettings') or {}).get('algorithm')
             if not algorithm and manifest['format'].startswith('leo-native-'):
                 summary = path.parent/'summary.json'
                 if summary.is_file():
                     algorithm = json.loads(summary.read_text(encoding='utf-8')).get('algorithm')
-            results.append({'runId':run_id, 'configName':manifest['configName'],
+            rows.append({'runId':run_id, 'configName':manifest['configName'],
                             'createdAt':str(manifest.get('createdAt') or ''), 'algorithm':algorithm})
         except (OSError, ValueError, TypeError, AttributeError, KeyError):
             continue
-    return sorted(results, key=lambda row: (row['createdAt'], row['runId']), reverse=True)
+    return sorted(rows, key=lambda row: (row['createdAt'], row['runId']), reverse=True)
 
 
 def compare_bundles(a,b):
@@ -61,7 +98,8 @@ def compare_bundles(a,b):
             'physicalDifferences':physical,'baseline':sa,'scenario':sb,
             'metrics':[{'name':k,'baseline':sa.get(k),'scenario':sb.get(k),'difference':sb[k]-sa[k] if isinstance(sa.get(k),(int,float)) and isinstance(sb.get(k),(int,float)) else None} for k in metrics]}
 
-def compare(base,a,b):
-    first=json.loads((folder(base,a)/'result.json').read_text(encoding='utf-8'))
-    second=json.loads((folder(base,b)/'result.json').read_text(encoding='utf-8'))
+def compare(base,a,b,*,results=None):
+    paths=[folder(base,run_id,results=results) for run_id in (a,b)]
+    for path in paths:completed_manifest(path)
+    first,second=(json.loads((path/'result.json').read_text(encoding='utf-8')) for path in paths)
     return compare_bundles(first['bundle'],second['bundle'])

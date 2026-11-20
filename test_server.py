@@ -22,6 +22,8 @@ class DataTests(unittest.TestCase):
                 folder = root/run_id
                 folder.mkdir(parents=True)
                 manifest = {'format': version, 'runId': run_id, 'configName': 'Dijkstra132', 'createdAt': date}
+                manifest['files']={'routes.csv':'checksum'}
+                (folder/'routes.csv').write_text('sample',encoding='utf8')
                 if run_id == 'new-result':
                     manifest['algorithmSettings'] = {'algorithm': 'mcsr-hr'}
                 (folder/'manifest.json').write_text(json.dumps(manifest), encoding='utf8')
@@ -32,6 +34,57 @@ class DataTests(unittest.TestCase):
             self.assertEqual([row['runId'] for row in rows], ['new-result', 'old-result'])
             self.assertEqual([row['algorithm'] for row in rows], ['mcsr-hr', None])
             self.assertTrue(all('summary' not in row for row in rows))
+
+    def test_new_bundle_waits_for_completion_and_matching_manifest(self):
+        from comparison import commit_result, run_metadata
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp)
+            folder=base/'data/runs/current-run';folder.mkdir(parents=True)
+            manifest={'format':'leo-native-replay-v4','runId':folder.name,'configName':'Dijkstra132',
+                      'files':{'routes.csv':'checksum'},'completionRequired':True}
+            path=folder/'manifest.json';path.write_text(json.dumps(manifest))
+            for name in ('routes.csv','result.json','performance.json'):(folder/name).touch()
+            self.assertEqual(run_metadata(base),[])
+            with patch.object(Path,'replace',side_effect=PermissionError('read-only')):
+                with self.assertRaises(PermissionError):commit_result(folder)
+            self.assertFalse((folder/'completed.tmp').exists())
+            self.assertEqual(run_metadata(base),[])
+            commit_result(folder)
+            self.assertEqual(run_metadata(base)[0]['runId'],folder.name)
+            path.write_text(json.dumps({**manifest,'createdAt':'changed'}))
+            self.assertEqual(run_metadata(base),[])
+
+    @unittest.skipUnless(__import__("os").name=="nt","Windows workspace lock")
+    def test_result_choice_leaves_settings_and_existing_results_in_place(self):
+        from result_bundle import ENTRY
+        from user_workspace import save_result_choice, select_results
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp).resolve()
+            assets=root/'release'; profile=root/'profile'; custom=root/'custom'
+            for path in (assets,profile,custom):path.mkdir()
+            ini=assets/'settings'/ENTRY;ini.parent.mkdir(parents=True);ini.write_text('edited')
+            existing=assets/'data/runs/old-run';existing.mkdir(parents=True)
+            self.assertEqual(select_results(assets,profile),(assets/'data',''))
+            save_result_choice(profile,assets,assets/'data',custom)
+            self.assertEqual(select_results(assets,profile),(custom,''))
+            self.assertTrue(existing.is_dir())
+            self.assertFalse((custom/'settings').exists())
+            self.assertTrue((custom/'runs').is_dir())
+            self.assertTrue((custom/'experiments').is_dir())
+            self.assertEqual(ini.read_text(),'edited')
+            save_result_choice(profile,assets,custom,None)
+            self.assertEqual(select_results(assets,profile),(assets/'data',''))
+    def test_workspace_logs_rotate(self):
+        from user_workspace import setup_logging, logger
+        with tempfile.TemporaryDirectory() as tmp:
+            profile=Path(tmp)
+            handler=setup_logging(profile)
+            try:
+                handler.maxBytes=120
+                for i in range(12):logger.info('A diagnostic line for rotation: %s',i)
+                self.assertEqual(len(list((profile/'logs').glob('app.log*'))),4)
+            finally:
+                logger.removeHandler(handler);handler.close()
 
     def test_all_existing_csv_fields_survive(self):
         raw = Path(server.BASE_DIR, "testdata/bundle/routes.csv").read_text()
@@ -86,6 +139,7 @@ class DataTests(unittest.TestCase):
             (base/'data/latest.json').write_text(json.dumps({'runId':'large-result-run'}))
             manifest={'runId':'large-result-run','files':{'routes.csv':'checksum'}}
             (folder/'manifest.json').write_text(json.dumps(manifest))
+            (folder/'routes.csv').write_text('sample',encoding='utf8')
             with (folder/'result.json').open('wb') as f:f.seek(9*1024*1024);f.write(b'invalid duplicate JSON')
             httpd=http.server.ThreadingHTTPServer(('127.0.0.1',0),server.SimHandler);thread=threading.Thread(target=httpd.serve_forever,daemon=True);thread.start()
             try:

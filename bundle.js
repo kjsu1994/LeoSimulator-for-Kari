@@ -169,6 +169,19 @@ async function bundleFromFiles(selection){
   const manifestFile=manifests[0],identifier=manifestFile.webkitRelativePath.split("/").at(-2);let text;
   try{text=await manifestFile.text();}catch(error){if(error.name!=="NotReadableError")throw error;return storedFolderBundle(identifier);}
   const manifest=JSON.parse(text.replace(/^\uFEFF/,"")),prefix=manifestFile.webkitRelativePath.slice(0,-manifestFile.name.length),available=new Map(selection.map(file=>[file.webkitRelativePath,file])),files={};
+  if(manifest.completionRequired){
+    const markerFile=available.get(prefix+"completed.json");
+    if(!markerFile)throw Error("완료된 실행 결과 폴더를 선택하세요.");
+    try {
+      const marker=JSON.parse(await markerFile.text());
+      const hash=[...new Uint8Array(await crypto.subtle.digest("SHA-256",await manifestFile.arrayBuffer()))]
+        .map(n=>n.toString(16).padStart(2,"0")).join("");
+      if(marker.runId!==manifest.runId||marker.manifestSHA256!==hash)throw Error("완료 기록과 결과가 일치하지 않습니다.");
+    } catch(error){
+      if(error.name!=="NotReadableError")throw error;
+      return storedFolderBundle(identifier);
+    }
+  }
   for(const name of Object.keys(manifest.files||{})){if(bundlePath("manifest.json",name)!==name)throw Error(`Invalid result path: ${name}`);const file=available.get(prefix+name);if(!file)throw Error(`Missing/invalid result file: ${name}`);files[name]=file;}
   return {manifest,files,sourceFolderId:identifier};
 }

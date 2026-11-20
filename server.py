@@ -13,8 +13,14 @@ import sys
 import threading
 import urllib.parse
 import webbrowser
+import logging
 
 BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+DATA_ROOT = None
+LOCATION_PROFILE = None
+WORKSPACE_NOTICE = ""
+RESULTS_WRITABLE = True
+logger = logging.getLogger('leo')
 RUN_LOCK = threading.Lock()
 NO_WIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -22,6 +28,14 @@ NO_WIN = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 LEO_DIR = os.path.join(BASE_DIR, "settings")
 from result_bundle import ENTRY
 INI_PATH = os.path.join(LEO_DIR, *ENTRY.split("/"))
+
+
+def results_options():
+    return {'results':DATA_ROOT} if DATA_ROOT is not None else {}
+
+
+def results_directory():
+    return DATA_ROOT if DATA_ROOT is not None else Path(BASE_DIR)/'data'
 
 
 def _strip_comment(raw):
@@ -180,7 +194,7 @@ def run_simulation(config_name="Dijkstra132"):
         raise RuntimeError("Another simulation is running")
     try:
         from run_manager import execute
-        return execute(BASE_DIR, LEO_DIR, INI_PATH, config_name, read_ini_config)
+        return execute(BASE_DIR, LEO_DIR, INI_PATH, config_name, read_ini_config, **results_options())
     finally:
         RUN_LOCK.release()
 
@@ -204,7 +218,7 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
         parsed=urllib.parse.urlparse(self.path)
         if parsed.path=='/api/experiments':
             rows=[]
-            for path in sorted((Path(BASE_DIR)/'data/experiments').glob('*/manifest.json'),reverse=True):
+            for path in sorted((results_directory()/'experiments').glob('*/manifest.json'),reverse=True):
                 try:
                     m=json.loads(path.read_text(encoding='utf8'))
                     if m.get('statistics') and m.get('status')=='completed':rows.append(m)
@@ -213,17 +227,17 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
         if parsed.path.startswith('/api/experiments/'):
             try:
                 from comparison import folder
-                run_id=parsed.path.rsplit('/',1)[-1];folder(BASE_DIR,run_id)
-                manifest=json.loads((Path(BASE_DIR)/'data/experiments'/run_id/'manifest.json').read_text(encoding='utf8'))
+                run_id=parsed.path.rsplit('/',1)[-1];folder(BASE_DIR,run_id,**results_options())
+                manifest=json.loads((results_directory()/'experiments'/run_id/'manifest.json').read_text(encoding='utf8'))
                 if manifest.get('status')!='completed':raise ValueError('Incomplete experiment')
-                return self.send_json(json.loads((Path(BASE_DIR)/'data/experiments'/run_id/'statistics.json').read_text(encoding='utf8')))
+                return self.send_json(json.loads((results_directory()/'experiments'/run_id/'statistics.json').read_text(encoding='utf8')))
             except (ValueError,OSError):return self.send_json({'error':'반복 실험 결과가 없습니다.'},404)
 
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/runs":
             from comparison import runs, run_metadata
             query = urllib.parse.parse_qs(parsed.query)
-            return self.send_json(run_metadata(BASE_DIR) if query.get("metadata") == ["1"] else runs(BASE_DIR))
+            return self.send_json(run_metadata(BASE_DIR,**results_options()) if query.get("metadata") == ["1"] else runs(BASE_DIR,**results_options()))
         if parsed.path.startswith("/api/run/"):
             from run_manager import state
             try:
@@ -234,7 +248,7 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
             from comparison import compare
             qs=urllib.parse.parse_qs(parsed.query)
             try:
-                return self.send_json(compare(BASE_DIR,qs.get("baseline",[""])[0],qs.get("run",[""])[0]))
+                return self.send_json(compare(BASE_DIR,qs.get("baseline",[""])[0],qs.get("run",[""])[0],**results_options()))
             except (ValueError,OSError,KeyError) as exc:
                 return self.send_json({"error":str(exc)},400)
         if parsed.path == "/api/config":
@@ -249,27 +263,71 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
                         return self.send_json(preview_defaults(INI_PATH,cfg_name))
                 cfg = load_external_inputs(read_ini_config(cfg_name), INI_PATH)
                 cfg['capabilities']['comparisonExecutionModes'] = EXECUTION_MODES
+                cfg['capabilities']['userWorkspace'] = DATA_ROOT is not None
+                if DATA_ROOT is not None:
+                    cfg['workspacePath']=str(DATA_ROOT)
+                    cfg['workspaceNotice']=WORKSPACE_NOTICE
                 return self.send_json(cfg)
             except (ValueError, OSError) as exc:
                 return self.send_json({"error": str(exc)}, 400)
         if parsed.path == "/api/result":
-            query = urllib.parse.parse_qs(parsed.query)
-            run_id = query.get("runId", [None])[0]
-            if run_id is None:
-                pointer = Path(BASE_DIR, "data/latest.json")
-                if not pointer.exists():
-                    return self.send_json(None)
-                run_id = json.loads(pointer.read_text(encoding="utf-8"))["runId"]
-            if not re.fullmatch(r"[A-Za-z0-9-]+", run_id):
-                return self.send_json({"error": "Invalid result pointer"}, 500)
-            folder=Path(BASE_DIR,"data/runs",run_id)
-            if not (folder/"manifest.json").is_file() and not (folder/"result.json").is_file():return self.send_json({"error":"보관된 실행 결과가 없습니다."},404)
-            if (query.get("metadata")==["1"] or (folder/"result.json").stat().st_size>8*1024*1024) and (folder/"manifest.json").is_file():
-                manifest=json.loads((folder/"manifest.json").read_text(encoding="utf-8"))
-                urls={name:"/data/runs/"+run_id+"/"+urllib.parse.quote(name,safe="/") for name in manifest["files"]}
-                return self.send_json({"ok":True,"runId":run_id,"bundle":{"manifest":manifest,"fileUrls":urls}})
-            return self.send_json(json.loads((folder/"result.json").read_text(encoding="utf-8")))
+            return self.get_result(urllib.parse.parse_qs(parsed.query))
         return super().do_GET()
+
+    def result_folder(self, run_id):
+        from comparison import completed_manifest, folder
+        directory=folder(BASE_DIR,run_id,**results_options())
+        if DATA_ROOT is not None and not directory.exists():
+            sample=Path(BASE_DIR)/'data/latest.json'
+            if json.loads(sample.read_bytes())['runId']==run_id:
+                directory=folder(BASE_DIR,run_id)
+        return directory,completed_manifest(directory)
+
+    def get_result(self, query):
+        run_id=query.get('runId',[None])[0]
+        if run_id is None:
+            for root in dict.fromkeys((results_directory(),Path(BASE_DIR)/'data')):
+                try:
+                    pointer=json.loads((root/'latest.json').read_bytes())
+                    run_id=pointer['runId']
+                    self.result_folder(run_id)
+                    break
+                except (OSError,ValueError,KeyError,TypeError,AttributeError):
+                    run_id=None
+            if run_id is None:return self.send_json(None)
+        try:
+            directory,manifest=self.result_folder(run_id)
+            result=directory/'result.json'
+            if query.get('metadata')==['1'] or not result.is_file() or result.stat().st_size>8*1024*1024:
+                urls={name:'/data/runs/'+run_id+'/'+urllib.parse.quote(name,safe='/') for name in manifest['files']}
+                return self.send_json({'ok':True,'runId':run_id,'bundle':{'manifest':manifest,'fileUrls':urls}})
+            payload=json.loads(result.read_bytes())
+            if payload['bundle']['manifest']!=manifest:raise ValueError('Result manifest mismatch')
+            return self.send_json(payload)
+        except (OSError,ValueError,KeyError,TypeError,AttributeError):
+            return self.send_json({'error':'보관된 실행 결과가 없습니다.'},404)
+
+    def send_head(self):
+        path=urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+        if not path.startswith('/data/runs/'):
+            return super().send_head()
+        try:
+            run_id,name=path[len('/data/runs/'):].split('/',1)
+            directory,manifest=self.result_folder(run_id)
+            if name not in manifest['files']:raise ValueError('Invalid result attachment')
+            file=(directory/name).open('rb')
+        except (OSError,ValueError,KeyError,TypeError,AttributeError):
+            self.send_error(404)
+            return None
+        try:
+            self.send_response(200)
+            self.send_header('Content-Type',self.guess_type(name))
+            self.send_header('Content-Length',str(os.fstat(file.fileno()).st_size))
+            self.end_headers()
+            return file
+        except BaseException:
+            file.close()
+            raise
 
     def do_POST(self):
         if self.headers.get("Origin") not in (None, f"http://127.0.0.1:{self.server.server_port}", f"http://localhost:{self.server.server_port}"):
@@ -283,6 +341,24 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
                 raise ValueError("Expected JSON object")
         except (ValueError, UnicodeError) as exc:
             return self.send_json({"error": str(exc)}, 400)
+
+        if DATA_ROOT is not None and self.path in ('/api/open-user-data','/api/workspace'):
+            try:
+                if self.path=='/api/open-user-data':
+                    os.startfile(str(DATA_ROOT))
+                    return self.send_json({'ok':True})
+                from user_workspace import save_result_choice
+                from run_manager import idle_workspace
+                target=body.get('path')
+                if 'path' not in body or (target is not None and
+                    (not isinstance(target,str) or not Path(target).is_absolute())):
+                    raise ValueError('저장 폴더를 선택하세요.')
+                with idle_workspace():
+                    save_result_choice(LOCATION_PROFILE,Path(BASE_DIR),DATA_ROOT,None if target is None else Path(target))
+                return self.send_json({'ok':True})
+            except (OSError,ValueError,RuntimeError) as exc:
+                logger.warning('Workspace operation failed: %s',exc)
+                return self.send_json({'error':str(exc)},400)
 
         if self.path == "/api/open-ini":
             try:
@@ -305,9 +381,12 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
         if self.path in ("/api/run","/api/experiments"):
             try:
                 if self.path=="/api/experiments" and body.get("algorithms") is None:raise ValueError("Select algorithms")
-                from run_manager import start
-                name=body.get("configName") or read_ini_config()["activeConfig"]
-                return self.send_json(start(BASE_DIR,LEO_DIR,INI_PATH,name,read_ini_config,body.get("variables"),body.get("algorithms") if self.path=="/api/experiments" else None,body.get("research")),202)
+                from run_manager import CONFIG_LOCK, start
+                with CONFIG_LOCK:
+                    if getattr(self.server,'closing',False):raise ValueError('프로그램을 종료하고 있습니다.')
+                    if not RESULTS_WRITABLE:raise ValueError('결과를 저장할 수 없습니다. INI 상세에서 결과 폴더를 선택한 뒤 앱을 다시 여세요.')
+                    name=body.get("configName") or read_ini_config()["activeConfig"]
+                    return self.send_json(start(BASE_DIR,LEO_DIR,INI_PATH,name,read_ini_config,body.get("variables"),body.get("algorithms") if self.path=="/api/experiments" else None,body.get("research"),**results_options()),202)
             except (ValueError,OSError,KeyError) as exc:
                 return self.send_json({"ok":False,"error":str(exc)},400)
         if self.path.startswith("/api/run/") and self.path.endswith("/cancel"):
@@ -320,20 +399,86 @@ class SimHandler(http.server.SimpleHTTPRequestHandler):
         self.send_error(404)
 
 
-if __name__ == "__main__":
-    port = 8090
-    url = f"http://127.0.0.1:{port}"
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", port), SimHandler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+def desktop():
+    from run_manager import shutdown
 
+    class Server(http.server.ThreadingHTTPServer):
+        def handle_error(self, request, client_address):
+            logger.exception('HTTP request failed')
+
+    with Server(('127.0.0.1',0),SimHandler) as srv:
+        url=f'http://127.0.0.1:{srv.server_port}'
+        logger.info('Server ready at %s',url)
+        serving=threading.Thread(target=srv.serve_forever,daemon=True)
+        serving.start()
+        try:
+            try:
+                import webview
+            except ImportError:
+                if DATA_ROOT is not None:raise
+                webbrowser.open(url)
+                input(f'Running at {url} (Press Enter to quit)...')
+                return
+
+            class WorkspaceDialog:
+                def choose_folder(self):
+                    picked=window.create_file_dialog(webview.FOLDER_DIALOG)
+                    return picked[0] if picked else None
+
+            window=webview.create_window('LEO Network Simulator',url,width=1520,height=900,
+                                         js_api=WorkspaceDialog() if DATA_ROOT is not None else None)
+            webview.start()
+        finally:
+            srv.closing=True
+            srv.shutdown()
+            shutdown()
+
+
+def main():
+    if not getattr(sys,'frozen',False):
+        desktop()
+        return
+    import ctypes
+    from user_workspace import initialize_results, location_profile,select_results,setup_logging
+    from windows_runtime import workspace_lock
+    from contextlib import ExitStack
+    global DATA_ROOT, LOCATION_PROFILE, WORKSPACE_NOTICE, RESULTS_WRITABLE
+    root=None
     try:
-        import webview
-        webview.create_window("LEO Network Simulator", url, width=1520, height=900)
-        webview.start()
-    except ImportError:
-        webbrowser.open(url)
-        input(f"Running at {url} (Press Enter to quit)...\n")
-    finally:
-        from run_manager import shutdown
-        shutdown()
-        srv.shutdown()
+        assets=Path(BASE_DIR).resolve()
+        LOCATION_PROFILE=location_profile(assets)
+        with ExitStack() as stack:
+            stack.enter_context(workspace_lock(LOCATION_PROFILE))
+            DATA_ROOT,WORKSPACE_NOTICE=select_results(assets,LOCATION_PROFILE)
+            root=assets
+            try:
+                DATA_ROOT.mkdir(parents=True,exist_ok=True)
+                stack.enter_context(workspace_lock(DATA_ROOT))
+                initialize_results(DATA_ROOT)
+            except OSError:
+                RESULTS_WRITABLE=False
+                WORKSPACE_NOTICE='현재 결과 폴더에 쓸 수 없습니다. 결과 폴더를 선택한 뒤 앱을 다시 여세요.'
+            try:
+                handler=setup_logging(assets)
+            except OSError:
+                handler=None
+            try:
+                logger.info('Starting LEO Network Simulator 1.0.0 from %s',BASE_DIR)
+                desktop()
+                logger.info('Application closed')
+            except Exception:
+                logger.exception('Application startup or shutdown failed')
+                raise
+            finally:
+                if handler is not None:
+                    logger.removeHandler(handler)
+                    handler.close()
+    except Exception as exc:
+        message=str(exc)
+        if root is not None and (root/'logs'/'app.log').is_file():
+            message+=f'\n\n로그: {root/"logs"/"app.log"}'
+        ctypes.windll.user32.MessageBoxW(None,message,'LEO Network Simulator',0x10)
+
+
+if __name__=='__main__':
+    main()

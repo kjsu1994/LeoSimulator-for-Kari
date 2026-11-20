@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Modified/adapted 2026-11-16; see THIRD_PARTY_NOTICES.txt.
 // Interactive 2D Map, Route Replay & Simulator Runner Controller
+let workspaceChangePending=false;
 const canvas = document.getElementById("mapCanvas");
 const ctx = canvas.getContext("2d");
 const W = 2160, H = 1080;
@@ -47,8 +48,8 @@ const dstFilter = document.getElementById("dstFilter");
 function populateFilters() {
   const prevSrc = srcFilter.value || "-1";
   const prevDst = dstFilter.value || "-1";
-  srcFilter.innerHTML = '<option value="-1">All Sources</option>';
-  dstFilter.innerHTML = '<option value="-1">All Destinations</option>';
+  srcFilter.innerHTML = '<option value="-1">출발지 전체</option>';
+  dstFilter.innerHTML = '<option value="-1">목적지 전체</option>';
 
   const fixed = STATIONS.filter(s => !s.mobile), mobile = STATIONS.filter(s => s.mobile);
   fixed.forEach(s => srcFilter.add(new Option(`GS${s.id}: ${s.name}`, `GS:${s.id}`)));
@@ -524,39 +525,6 @@ function setStatus(msg) {
   if (!runActivity.classList.contains("running")) showRunActivity(msg);
 }
 
-const escHtml = s => String(s).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
-const iniFilter = document.getElementById("iniFilter");
-const chkShowNodes = document.getElementById("chkShowNodes");
-let currentEffectiveEntries = [],iniLabels={};
-const INI_NAMES={sendInterval:"송신 간격",packetSize:"패킷 크기",startTime:"송신 시작",endTime:"송신 종료",enabled:"사용 여부",dstType:"목적지 종류",dstStation:"목적지 노드",metric:"경로 선택 기준",service:"MCSR 서비스",routingType:"라우팅 모듈",algorithm:"알고리즘",numSatellites:"위성 수",numTerminals:"단말 수",nrOfGS:"지상 노드 수","sim-time-limit":"실행 시간","seed-0-mt":"난수 시드"};
-function iniLabel(key){return iniLabels[key]||INI_NAMES[key.split(".").at(-1)]||"";}
-
-function flashEl(el) {
-  if (!el) return;
-  el.classList.remove("flash-change");
-  void el.offsetWidth;
-  el.classList.add("flash-change");
-  clearTimeout(el._flashTid);
-  el._flashTid = setTimeout(() => el.classList.remove("flash-change"), 900);
-}
-
-function renderIniTable() {
-  const q = (iniFilter.value || "").trim().toLowerCase();
-  const showNodes = chkShowNodes.checked;
-  const rows = currentEffectiveEntries.filter(e => {
-    if (!showNodes && !q && /^\*\.(station|terminal)\[\d+\]\.(mob|mobility|label|nodeType)/.test(e.k)) return false;
-    return !q || iniLabel(e.k).toLowerCase().includes(q) || e.k.toLowerCase().includes(q) || String(e.v).toLowerCase().includes(q) || e.sec.toLowerCase().includes(q);
-  });
-  document.querySelector("#iniTable tbody").innerHTML = rows.map(e => {
-    const ov = e.sec !== "General" ? " class=\"ini-override\"" : "";
-    return `<tr${ov}><td class="ini-k" title="${escHtml(e.k)}">${iniLabel(e.k)?`<strong class="ini-label">${escHtml(iniLabel(e.k))}</strong>`:""}${escHtml(e.k)}</td><td class="ini-v" title="${escHtml(e.v)}">${escHtml(e.v)}</td><td class="ini-s">[${escHtml(e.sec)}]</td></tr>`;
-  }).join("");
-  document.getElementById("iniCount").textContent = `표시 ${rows.length} / 전체 ${currentEffectiveEntries.length}개 INI 키 (파란 강조 = 상속/시나리오 설정)`;
-}
-
-iniFilter.oninput = renderIniTable;
-chkShowNodes.onchange = renderIniTable;
-
 const SCENARIO_NAMES={
   Dijkstra132:"기본 통신",Dijkstra132Pair:"단일 구간 통신",Dijkstra132StationsOnly:"지상국 간 통신",Dijkstra132PairFail:"반복 링크 장애",Dijkstra132RandomFail:"무작위 링크 장애",
   PaperS1:"대규모 단일 구간",PaperS1Load:"대규모 부하",PaperS1DijkstraCutFlood:"대규모 장애·복구"
@@ -624,7 +592,7 @@ function scenarioMeaning(cfg){
   return senders.length?`${senders.length}개 송신 노드에서 발생하는 패킷의 경로·전달률·지연을 확인합니다.`:"";
 }
 
-function updateProfileBox(cfg, highlight) {
+function updateProfileBox(cfg) {
   const meaning=document.getElementById("scenarioMeaning");
   meaning.textContent=scenarioMeaning(cfg);
   meaning.hidden=!meaning.textContent;
@@ -639,40 +607,25 @@ function updateProfileBox(cfg, highlight) {
   const interval = value("*.station[*].traffic.sendInterval");
   const size = value("*.station[*].traffic.packetSize");
   document.getElementById("scenarioTraffic").textContent = interval && size ? `${interval} · ${size}` : (cfg.activeConfig ? "노드별 설정" : "—");
-  document.getElementById("scenarioTerminals").textContent = cfg.numTerminals == null ? "—" : (cfg.numTerminals === 0 ? "사용 안 함" : `${cfg.numTerminals}개`);
   const iniSrc = document.getElementById("cfgIniSrc");
-  const descEl = document.getElementById("cfgDesc");
-  const extEl = document.getElementById("cfgExtends");
-  const ownEl = document.getElementById("cfgOwnIni");
-
   if (cfg.iniPath) {
-    iniSrc.textContent = cfg.iniPath.startsWith("config/") ? `보관된 설정: ${cfg.iniPath}` : cfg.leoFound ? `📂 ${cfg.iniPath}` : `⚠️ 내장 백업: ${cfg.iniPath}`;
+    iniSrc.textContent = cfg.iniPath.startsWith("config/") ? `보관된 설정: ${cfg.iniPath}` : cfg.leoFound ? cfg.iniPath : `⚠️ 내장 백업: ${cfg.iniPath}`;
     iniSrc.title = cfg.iniPath;
-    iniSrc.style.color = cfg.leoFound ? "#69f0ae" : "#ffe066";
   } else if (!location.protocol.startsWith("http")) {
     iniSrc.textContent = "ℹ️ 로컬 HTML 모드";
     iniSrc.style.color = "#8da2c0";
   }
 
-  const desc = cfg.description || "";
-  descEl.textContent = desc;
-  descEl.hidden = !desc;
 
-  const chainTxt = Array.isArray(cfg.extends) && cfg.extends.length
-    ? `extends = ${cfg.extends.join(", ")}`
-    : (Array.isArray(cfg.chain) && cfg.chain.length > 1 ? `상속: ${cfg.chain.join(" → ")}` : "");
-  extEl.textContent = chainTxt;
-  extEl.hidden = !chainTxt;
-
-  const active = cfg.activeConfig || cfgNameSel.value || "Dijkstra132";
-  const ownLines = (cfg.ownEntries || []).map(e => `${e.k} = ${e.v}`);
-  ownEl.textContent = `[Config ${active}]\n` + (ownLines.length ? ownLines.join("\n") : "; (직접 오버라이드 없음 — extends 설정 그대로 사용)");
-
-  if (highlight) flashEl(document.getElementById("cfgProfile"));
 }
 
 function applyLoadedConfig(cfg, opts = {}) {
   if (!cfg) return;
+  if(Object.hasOwn(cfg.capabilities||{},"userWorkspace")){
+    document.getElementById("workspaceSettings").hidden=!cfg.capabilities.userWorkspace;
+    document.getElementById("workspacePath").textContent=cfg.workspacePath||"";
+    if(!workspaceChangePending)setWorkspaceNotice(cfg.workspaceNotice||"");
+  }
   selectedConfig=cfg;
   const algorithmChoice=document.getElementById("algorithmChoice");
   algorithmChoice.replaceChildren();
@@ -702,10 +655,7 @@ function applyLoadedConfig(cfg, opts = {}) {
 
 
   window.dispatchEvent(new CustomEvent("sim-config",{detail:cfg}));
-  iniLabels=Object.fromEntries((cfg.capabilities?.fields||[]).map(f=>[f.ini,f.label]));
-  currentEffectiveEntries = Array.isArray(cfg.effectiveEntries) ? cfg.effectiveEntries : [];
-  updateProfileBox(cfg, !!opts.announce);
-  renderIniTable();
+  updateProfileBox(cfg);
 
   if (opts.announce && !showingPreviousRun) {
     setStatus(`${scenarioName(cfg.activeConfig)} · ${algorithmName(cfg)} 설정을 불러왔습니다.`);
@@ -713,8 +663,7 @@ function applyLoadedConfig(cfg, opts = {}) {
   render();
 }
 
-updateProfileBox({}, false);
-renderIniTable();
+updateProfileBox({});
 
 if (location.protocol.startsWith("http")) {
   let configRequest = 0;
@@ -736,6 +685,34 @@ if (location.protocol.startsWith("http")) {
   window.addEventListener("focus", () => !configSaving&&fetchConfig(cfgNameSel.dataset.loaded ? cfgNameSel.value : "", false));
 }
 
+function setWorkspaceNotice(message){
+  const notice=document.getElementById("workspaceNotice");
+  notice.textContent=message;
+  notice.hidden=!message;
+}
+async function changeWorkspace(reset){
+  const controls=["btnSelectWorkspace","btnResetWorkspace"].map(id=>document.getElementById(id));
+  controls.forEach(button=>button.disabled=true);
+  try {
+    const path=reset?null:await window.pywebview.api.choose_folder();
+    if(!reset&&!path)return;
+    const response=await fetch("/api/workspace",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({path})});
+    const result=await response.json();
+    if(!response.ok)throw Error(result.error);
+    workspaceChangePending=true;
+    setWorkspaceNotice(reset?"다시 열면 기본 위치를 사용합니다.":`다시 열면 ${path}에 저장합니다.`);
+  } catch(error){setWorkspaceNotice(error.message);}
+  finally{controls.forEach(button=>button.disabled=false);}
+}
+document.getElementById("btnSelectWorkspace").onclick=()=>changeWorkspace(false);
+document.getElementById("btnResetWorkspace").onclick=()=>changeWorkspace(true);
+document.getElementById("btnUserData").onclick=async()=>{
+  try {
+    const response=await fetch("/api/open-user-data",{method:"POST"});
+    if(!response.ok)throw Error((await response.json()).error);
+  } catch(error){setStatus(error.message);}
+};
 document.getElementById("btnOpenIni").onclick = async () => {
   if (location.protocol === "file:") {
     setStatus("INI 편집은 sim-ui.exe 또는 start_ui.bat에서 사용할 수 있습니다. HTML에 표시된 INI는 저장된 실행의 사본입니다.");

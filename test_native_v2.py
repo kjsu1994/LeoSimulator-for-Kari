@@ -180,6 +180,69 @@ class JobV2Tests(unittest.TestCase):
                 self.assertLess(time.monotonic()-start,2);time.sleep(.02)
             self.assertEqual(run_manager.state(job['runId'])['status'],'cancelled');self.assertEqual((base/'data/latest.json').read_bytes(),pointer)
             self.assertFalse((base/'data/runs'/job['runId']/'manifest.json').exists())
+    def test_comparison_uses_custom_result_folder(self):
+        import time
+        from comparison import compare, run_metadata
+        from run_manager import start, state
+        with tempfile.TemporaryDirectory() as tmp:
+            selected=Path(tmp)
+            def read(name, variables=None):
+                cfg=server.read_ini_config(name,variables=variables)
+                cfg['simTimeLimit']=3.
+                for station in cfg['stations']:
+                    if station['enabled']:station.update(startTime=0,endTime=3.)
+                return cfg
+            job=start(server.BASE_DIR,server.LEO_DIR,server.INI_PATH,'Dijkstra132',read,
+                      algorithms=['dijkstra-delay','mcsr-hr'],research={'executionMode':'sequential'},
+                      results=selected)
+            deadline=time.monotonic()+30
+            while True:
+                status=state(job['runId'])
+                if status['status']=='completed':break
+                self.assertNotIn(status['status'],('failed','cancelled'),status)
+                self.assertLess(time.monotonic(),deadline)
+                time.sleep(.1)
+            ids=[row['runId'] for row in run_metadata(server.BASE_DIR,results=selected)]
+            self.assertEqual(len(ids),2)
+            self.assertTrue(compare(server.BASE_DIR,*ids,results=selected)['trafficMatches'])
+            self.assertTrue((selected/'experiments'/job['runId']/'manifest.json').is_file())
+            self.assertFalse((selected/'settings').exists())
+
+    @unittest.skipUnless(__import__('os').name=='nt','Windows Job Object')
+    def test_job_kills_engine_when_host_is_terminated(self):
+        import _winapi, sys, time
+        engine=Path(server.BASE_DIR)/'engine/engine.exe'
+        for phase in ('prepare','execute'):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp);source=root/'input.json';marker=root/'pid'
+                c=server.read_ini_config('Dijkstra132');c['simTimeLimit']=100000
+                source.write_text(json.dumps(c),encoding='utf-8')
+                code="""import sys,time
+from pathlib import Path
+from windows_runtime import launch_engine
+marker=Path(sys.argv[1])
+with marker.with_suffix('.log').open('wb') as log, launch_engine(sys.argv[2:],log,0x08000000) as engine:
+    marker.write_text(str(engine.pid))
+    time.sleep(60)
+"""
+                args=[str(engine),str(source),str(root)]
+                if phase=='prepare':args.append('--prepare')
+                with subprocess.Popen([sys.executable,'-c',code,str(marker),*args],cwd=server.BASE_DIR,
+                                      creationflags=subprocess.CREATE_NO_WINDOW) as owner:
+                    handle=None
+                    try:
+                        deadline=time.monotonic()+12
+                        while not marker.exists() or not marker.read_text():
+                            self.assertIsNone(owner.poll())
+                            self.assertLess(time.monotonic(),deadline)
+                            time.sleep(.05)
+                        handle=_winapi.OpenProcess(0x00100000,False,int(marker.read_text()))
+                        self.assertEqual(_winapi.WaitForSingleObject(handle,0),_winapi.WAIT_TIMEOUT)
+                        owner.kill();owner.wait(timeout=5)
+                        self.assertEqual(_winapi.WaitForSingleObject(handle,5000),0)
+                    finally:
+                        if owner.poll() is None:owner.kill()
+                        if handle is not None:_winapi.CloseHandle(handle)
     def test_reference_core_fingerprints(self):
         root=Path(server.BASE_DIR)/'engine/vendor';origin=json.loads((root/'routing-origin.json').read_text())
         for name,digest in origin.items():self.assertEqual(hashlib.sha256((root/'routing'/name).read_bytes()).hexdigest(),digest)

@@ -17,6 +17,15 @@ const files=Object.fromEntries(Object.keys(manifest.files).map(n=>[n,fs.readFile
     await assert.rejects(bundleFromFiles([{...unreadable,text:async()=>'{broken'}]));assert.equal(fallbackCalls,1);
     await assert.rejects(prepareBundle({manifest,files:{...files,'routes.csv':'changed'},sourceFolderId:'reference-dijkstra'}));assert.equal(fallbackCalls,1);
   }finally{global.fetch=savedFetch;global.location=savedLocation;}
+  const newManifest={...manifest,completionRequired:true};
+  const selectedFile=(name,text)=>Object.assign(new Blob([text]),{name,webkitRelativePath:manifest.runId+"/"+name});
+  const manifestText=JSON.stringify(newManifest);
+  const manifestHash=require("node:crypto").createHash("sha256").update(manifestText).digest("hex");
+  const selection=[selectedFile("manifest.json",manifestText),...Object.entries(files).map(([name,text])=>selectedFile(name,text))];
+  const marker=hash=>selectedFile("completed.json",JSON.stringify({runId:manifest.runId,manifestSHA256:hash}));
+  await assert.rejects(bundleFromFiles(selection));
+  await assert.rejects(bundleFromFiles([...selection,marker("wrong")]));
+  assert.equal((await bundleFromFiles([...selection,marker(manifestHash)])).manifest.runId,manifest.runId);
   assert.equal(prepared.config.numSatellites,132);assert.equal(prepared.config.stations.length,13);
   assert.equal(prepared.config.stations[9].mobile,true);assert.equal(prepared.config.stations[9].speed,250);
   assert.equal(prepared.config.metric,"delay");assert.equal(prepared.routes.length,2671);

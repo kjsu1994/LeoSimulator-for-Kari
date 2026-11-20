@@ -24,6 +24,7 @@ exe = EXE(
     a.datas,
     [],
     name='sim-ui',
+    icon=str(Path(SPECPATH) / 'sim-ui.ico'),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
